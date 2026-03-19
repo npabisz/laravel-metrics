@@ -9,6 +9,7 @@ use Npabisz\LaravelMonitoring\Models\MonitoringSlowLog;
 
 class MonitoringService
 {
+    protected bool $enabled;
     protected ?string $redisConnection = null;
     protected ?string $redisPrefix = null;
 
@@ -17,8 +18,14 @@ class MonitoringService
 
     public function __construct()
     {
+        $this->enabled = (bool) config('monitoring.enabled', true);
         $this->redisConnection = config('monitoring.redis_connection', 'default');
         $this->redisPrefix = config('monitoring.redis_prefix', 'monitoring:');
+    }
+
+    public function isEnabled(): bool
+    {
+        return $this->enabled;
     }
 
     /**
@@ -36,6 +43,8 @@ class MonitoringService
      */
     public function increment(string $group, string $key, int $amount = 1): void
     {
+        if (!$this->enabled) return;
+
         try {
             $redisKey = $this->redisPrefix . $group . ':' . $key;
             $redis = Redis::connection($this->redisConnection);
@@ -56,6 +65,8 @@ class MonitoringService
      */
     public function pushToList(string $group, string $key, $value): void
     {
+        if (!$this->enabled) return;
+
         try {
             $redisKey = $this->redisPrefix . $group . ':' . $key;
             $redis = Redis::connection($this->redisConnection);
@@ -213,6 +224,8 @@ class MonitoringService
         string $connection,
         ?array $context = null
     ): void {
+        if (!$this->enabled) return;
+
         try {
             MonitoringSlowLog::create([
                 'recorded_at' => now(),
@@ -240,6 +253,8 @@ class MonitoringService
         ?int    $userId = null,
         ?array  $context = null
     ): void {
+        if (!$this->enabled) return;
+
         try {
             MonitoringSlowLog::create([
                 'recorded_at' => now(),
