@@ -12,7 +12,9 @@ class DashboardController extends Controller
 {
     public function index()
     {
-        return view('monitoring::dashboard');
+        return view('monitoring::dashboard', [
+            'customCharts' => config('monitoring.dashboard.custom_charts', []),
+        ]);
     }
 
     public function apiData(Request $request): JsonResponse

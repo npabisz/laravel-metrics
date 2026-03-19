@@ -239,6 +239,7 @@
 
         // ─── State ──────────────────────────────────────────────
         const basePath = '{{ rtrim(config("monitoring.dashboard.path", "monitoring"), "/") }}';
+        const customChartConfig = @json($customCharts ?? []);
         let refreshTimer = null;
         let currentSlowType = '';
         let currentSlowSort = 'duration';
@@ -416,28 +417,57 @@
         }
 
         // ─── Custom charts ──────────────────────────────────────
-        function getCustomMetricColor(key, index) {
-            const k = key.toLowerCase();
-            if (k.includes('error') || k.includes('5xx') || k.includes('fail') || k.includes('slow') || k.includes('max') || k.includes('high') || k.includes('timeout')) {
-                return COLORS.red;
+        const SAFE_COLORS = [COLORS.blue, COLORS.green, COLORS.yellow, COLORS.purple, COLORS.cyan, COLORS.orange, COLORS.pink];
+        const ERROR_PATTERN = /error|5xx|fail|slow|max|high|timeout/i;
+
+        function resolveColor(name) { return COLORS[name] || null; }
+
+        function getCustomMetricColor(key, index, colorMap) {
+            if (colorMap) {
+                const clean = key.replace('c:', '');
+                // Per-key color: { 'metric_name': 'red' }
+                if (typeof colorMap === 'object' && !Array.isArray(colorMap)) {
+                    // Check exact key match first, then wildcard patterns
+                    if (colorMap[clean]) return resolveColor(colorMap[clean]) || COLORS.blue;
+                    for (const [pattern, color] of Object.entries(colorMap)) {
+                        if (pattern.endsWith('*') && clean.startsWith(pattern.slice(0, -1))) {
+                            return resolveColor(color) || COLORS.blue;
+                        }
+                    }
+                }
+                // Indexed array: ['blue', 'red', 'green']
+                if (Array.isArray(colorMap) && colorMap[index]) {
+                    return resolveColor(colorMap[index]) || COLORS.blue;
+                }
             }
-            // Skip red (index 1) for non-error metrics
-            const safeColors = [COLORS.blue, COLORS.green, COLORS.yellow, COLORS.purple, COLORS.cyan, COLORS.orange, COLORS.pink];
-            return safeColors[index % safeColors.length];
+            if (ERROR_PATTERN.test(key)) return COLORS.red;
+            return SAFE_COLORS[index % SAFE_COLORS.length];
+        }
+
+        function matchesPattern(key, pattern) {
+            if (pattern.endsWith('*')) {
+                return key.startsWith(pattern.slice(0, -1));
+            }
+            return key === pattern;
         }
 
         function renderCustomCharts(timeline, labels) {
             const grid = document.getElementById('customChartsGrid');
             const title = document.getElementById('customChartsTitle');
 
-            const customKeys = {};
-            timeline.forEach(row => Object.keys(row).forEach(k => { if (k.startsWith('c:')) customKeys[k] = true; }));
-            const keys = Object.keys(customKeys);
+            const allCustomKeys = {};
+            timeline.forEach(row => Object.keys(row).forEach(k => { if (k.startsWith('c:')) allCustomKeys[k] = true; }));
+            const keys = Object.keys(allCustomKeys);
 
             if (keys.length === 0) { grid.innerHTML = ''; title.style.display = 'none'; return; }
             title.style.display = '';
 
-            const groups = groupCustomKeys(keys);
+            let groups;
+            if (customChartConfig.length > 0) {
+                groups = buildConfigGroups(keys);
+            } else {
+                groups = autoGroupKeys(keys);
+            }
 
             // Destroy old custom charts
             Object.keys(charts).forEach(k => {
@@ -449,12 +479,11 @@
             ).join('');
 
             groups.forEach(group => {
-                let nonErrorIndex = 0;
+                let colorIndex = 0;
                 const datasets = group.keys.map((key) => {
                     const label = formatMetricLabel(key.replace('c:', ''));
                     const isRate = key.includes('avg') || key.includes('_ms') || key.includes('_rate');
-                    const isError = /error|5xx|fail|slow|max|high|timeout/i.test(key);
-                    const c = isError ? COLORS.red : getCustomMetricColor(key, nonErrorIndex++);
+                    const c = getCustomMetricColor(key, colorIndex++, group.colors);
                     return {
                         label,
                         data: timeline.map(d => d[key] || 0),
@@ -478,7 +507,38 @@
             });
         }
 
-        function groupCustomKeys(keys) {
+        // Build groups from user-defined config, leftover keys auto-grouped
+        function buildConfigGroups(allKeys) {
+            const claimed = new Set();
+            const groups = [];
+
+            customChartConfig.forEach((cfg, i) => {
+                const matched = allKeys.filter(k => {
+                    const clean = k.replace('c:', '');
+                    return (cfg.keys || []).some(pattern => matchesPattern(clean, pattern));
+                });
+                matched.forEach(k => claimed.add(k));
+                if (matched.length > 0) {
+                    groups.push({
+                        id: 'customChart_cfg_' + i,
+                        label: cfg.label || 'Custom ' + (i + 1),
+                        keys: matched,
+                        colors: cfg.colors || null,
+                    });
+                }
+            });
+
+            // Auto-group unclaimed keys
+            const unclaimed = allKeys.filter(k => !claimed.has(k));
+            if (unclaimed.length > 0) {
+                autoGroupKeys(unclaimed).forEach(g => groups.push(g));
+            }
+
+            return groups;
+        }
+
+        // Auto-group by shared prefix with merge logic
+        function autoGroupKeys(keys) {
             const cleanKeys = keys.map(k => k.replace('c:', ''));
 
             // Find the longest prefix shared with at least one other key
@@ -496,7 +556,6 @@
                 keyToPrefix[key] = bestPrefix;
             });
 
-            // Build initial groups
             const prefixMap = {};
             cleanKeys.forEach(key => {
                 const p = keyToPrefix[key];
@@ -504,7 +563,7 @@
                 prefixMap[p].push('c:' + key);
             });
 
-            // Merge small groups (<=2 items) into the closest larger group sharing a common first segment
+            // Merge small groups (<=2 items) into the closest group sharing a common first segment
             let changed = true;
             while (changed) {
                 changed = false;
@@ -529,20 +588,13 @@
                 }
             }
 
-            // Combine remaining single-item groups into "Other"
-            const singles = [];
-            Object.entries(prefixMap).forEach(([prefix, items]) => {
-                if (items.length === 1) { singles.push(...items); delete prefixMap[prefix]; }
-            });
-            if (singles.length > 0) prefixMap['other'] = singles;
-
             const groups = [];
             const maxPerChart = 5;
             Object.entries(prefixMap).forEach(([prefix, groupKeys]) => {
                 for (let i = 0; i < groupKeys.length; i += maxPerChart) {
                     const chunk = groupKeys.slice(i, i + maxPerChart);
                     const suffix = groupKeys.length > maxPerChart ? ` (${Math.floor(i/maxPerChart)+1})` : '';
-                    groups.push({ id: 'customChart_' + prefix + '_' + i, label: formatMetricLabel(prefix) + suffix, keys: chunk });
+                    groups.push({ id: 'customChart_' + prefix + '_' + i, label: formatMetricLabel(prefix) + suffix, keys: chunk, colors: null });
                 }
             });
             return groups;

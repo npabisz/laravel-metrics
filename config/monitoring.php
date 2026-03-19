@@ -132,6 +132,45 @@ return [
     'dashboard' => [
         'enabled' => env('MONITORING_DASHBOARD_ENABLED', true),
         'path'    => env('MONITORING_DASHBOARD_PATH', 'monitoring'),
+
+        /*
+        |----------------------------------------------------------------------
+        | Custom Timeline Charts
+        |----------------------------------------------------------------------
+        | Define how custom metrics are grouped into charts.
+        | When empty (default), metrics are auto-grouped by shared prefix.
+        |
+        | Each entry creates one chart panel. Metrics matching the keys
+        | array are included. Use '*' suffix for wildcard (e.g. 'api_*').
+        |
+        | Colors are optional. Without explicit colors, error-like metrics
+        | (error, fail, max, slow, high, timeout, 5xx) automatically get
+        | red, and others cycle through blue, green, yellow, purple, etc.
+        |
+        | Colors can be defined as:
+        |   - Indexed array: ['blue', 'red', 'green'] — applied by position
+        |   - Keyed map: ['checkout_errors' => 'red', 'checkout_*' => 'blue']
+        |     Exact keys are checked first, then wildcard patterns.
+        |
+        | Available colors: blue, red, green, yellow, purple, cyan, orange, pink
+        |
+        | Example:
+        |   [
+        |       'label'  => 'Checkout',
+        |       'keys'   => ['checkout_requests', 'checkout_errors', 'checkout_avg_duration_ms'],
+        |       'colors' => ['checkout_errors' => 'red', 'checkout_*' => 'blue'],
+        |   ],
+        |   [
+        |       'label'  => 'Google API',
+        |       'keys'   => ['google_api_*'],
+        |   ],
+        |   [
+        |       'label'  => 'Webhooks',
+        |       'keys'   => ['webhook_*'],
+        |       'colors' => ['blue', 'green', 'yellow', 'purple', 'cyan'],
+        |   ],
+        */
+        'custom_charts' => [],
     ],
 
     /*
