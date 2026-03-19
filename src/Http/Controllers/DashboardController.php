@@ -66,21 +66,34 @@ class DashboardController extends Controller
                 'disk_free_gb'        => $latest->disk_free_gb,
                 'custom'              => $this->aggregateCustomMetrics($metrics),
             ],
-            'timeline' => $metrics->map(fn ($m) => [
-                'time'             => $m->recorded_at->format('H:i'),
-                'requests'         => $m->http_requests_total,
-                'avg_duration'     => round($m->http_avg_duration_ms, 1),
-                'max_duration'     => round($m->http_max_duration_ms, 1),
-                'errors_5xx'       => $m->http_requests_5xx,
-                'queue_high'       => $m->queue_depth_high,
-                'queue_default'    => $m->queue_depth_default,
-                'queue_low'        => $m->queue_depth_low,
-                'db_queries'       => $m->db_queries_total,
-                'db_slow'          => $m->db_slow_queries,
-                'cpu'              => $m->cpu_load_1m,
-                'redis_memory'     => $m->redis_memory_used_mb,
-                'redis_ops'        => $m->redis_ops_per_sec,
-            ])->values(),
+            'timeline' => $metrics->map(function ($m) {
+                $row = [
+                    'time'             => $m->recorded_at->format('H:i'),
+                    'requests'         => $m->http_requests_total,
+                    'avg_duration'     => round($m->http_avg_duration_ms, 1),
+                    'max_duration'     => round($m->http_max_duration_ms, 1),
+                    'errors_5xx'       => $m->http_requests_5xx,
+                    'queue_high'       => $m->queue_depth_high,
+                    'queue_default'    => $m->queue_depth_default,
+                    'queue_low'        => $m->queue_depth_low,
+                    'db_queries'       => $m->db_queries_total,
+                    'db_slow'          => $m->db_slow_queries,
+                    'cpu'              => $m->cpu_load_1m,
+                    'redis_memory'     => $m->redis_memory_used_mb,
+                    'redis_ops'        => $m->redis_ops_per_sec,
+                ];
+
+                // Include numeric custom metrics in timeline
+                if (is_array($m->custom)) {
+                    foreach ($m->custom as $key => $value) {
+                        if (is_numeric($value)) {
+                            $row['c:' . $key] = $value;
+                        }
+                    }
+                }
+
+                return $row;
+            })->values(),
         ]);
     }
 

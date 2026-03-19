@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monitoring Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <style>
         :root {
             --bg: #0f172a;
@@ -41,7 +42,6 @@
         .grid { display: grid; gap: 16px; }
         .grid-4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
         .grid-2 { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
-        .grid-1 { grid-template-columns: 1fr; }
         .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
         .card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; }
         .card-value { font-size: 28px; font-weight: 700; line-height: 1.2; }
@@ -53,13 +53,7 @@
         .card-value.purple { color: var(--purple); }
         .card-value.cyan { color: var(--cyan); }
         .section-title { font-size: 14px; font-weight: 600; color: var(--text-muted); margin: 24px 0 12px; text-transform: uppercase; letter-spacing: 1px; }
-        .chart-container { position: relative; height: 200px; overflow: hidden; }
-        .chart-canvas { width: 100%; height: 100%; }
-        .bar-chart { display: flex; align-items: flex-end; gap: 2px; height: 100%; padding-top: 20px; }
-        .bar { flex: 1; min-width: 3px; border-radius: 2px 2px 0 0; transition: height 0.3s; position: relative; }
-        .bar:hover { opacity: 0.8; }
-        .bar-tooltip { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: var(--bg); border: 1px solid var(--border); padding: 4px 8px; border-radius: 4px; font-size: 11px; white-space: nowrap; z-index: 5; pointer-events: none; }
-        .bar:hover .bar-tooltip { display: block; }
+        .chart-container { position: relative; height: 220px; }
         .table-wrapper { overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         th { text-align: left; padding: 10px 12px; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -131,30 +125,22 @@
             <div class="card"><div class="card-title">Disk Free</div><div class="card-value" id="diskFree">--</div></div>
         </div>
 
-        <!-- Custom Metrics -->
+        <!-- Custom Metrics Cards -->
         <div class="section-title" id="customTitle" style="display:none">Custom Metrics</div>
         <div class="grid grid-4" id="customCards"></div>
 
-        <!-- Charts -->
+        <!-- Built-in Charts -->
         <div class="section-title">Timeline</div>
         <div class="grid grid-2">
-            <div class="card">
-                <div class="card-title">Requests / minute</div>
-                <div class="chart-container"><div class="bar-chart" id="chartRequests"></div></div>
-            </div>
-            <div class="card">
-                <div class="card-title">Response time (ms) - avg / max</div>
-                <div class="chart-container"><div class="bar-chart" id="chartDuration"></div></div>
-            </div>
-            <div class="card">
-                <div class="card-title">Queue depth</div>
-                <div class="chart-container"><div class="bar-chart" id="chartQueue"></div></div>
-            </div>
-            <div class="card">
-                <div class="card-title">DB queries / minute</div>
-                <div class="chart-container"><div class="bar-chart" id="chartDb"></div></div>
-            </div>
+            <div class="card"><div class="card-title">Requests / minute</div><div class="chart-container"><canvas id="chartRequests"></canvas></div></div>
+            <div class="card"><div class="card-title">Response time (ms)</div><div class="chart-container"><canvas id="chartDuration"></canvas></div></div>
+            <div class="card"><div class="card-title">Queue depth</div><div class="chart-container"><canvas id="chartQueue"></canvas></div></div>
+            <div class="card"><div class="card-title">DB queries / minute</div><div class="chart-container"><canvas id="chartDb"></canvas></div></div>
         </div>
+
+        <!-- Custom Charts -->
+        <div class="section-title" id="customChartsTitle" style="display:none">Custom Timeline</div>
+        <div class="grid grid-2" id="customChartsGrid"></div>
 
         <!-- Slow Logs -->
         <div class="section-title">Slow Logs</div>
@@ -166,30 +152,78 @@
             </div>
             <div class="table-wrapper">
                 <table>
-                    <thead>
-                        <tr>
-                            <th>Type</th>
-                            <th>Duration</th>
-                            <th>Detail</th>
-                            <th>Status</th>
-                            <th>User</th>
-                            <th>Time</th>
-                        </tr>
-                    </thead>
-                    <tbody id="slowLogsBody">
-                        <tr><td colspan="6" class="no-data">Loading...</td></tr>
-                    </tbody>
+                    <thead><tr><th>Type</th><th>Duration</th><th>Detail</th><th>Status</th><th>User</th><th>Time</th></tr></thead>
+                    <tbody id="slowLogsBody"><tr><td colspan="6" class="no-data">Loading...</td></tr></tbody>
                 </table>
             </div>
         </div>
     </div>
 
     <script>
+        // ─── Chart.js defaults ──────────────────────────────────
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.borderColor = '#334155';
+        Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        Chart.defaults.font.size = 11;
+        Chart.defaults.animation.duration = 400;
+        Chart.defaults.plugins.legend.labels.boxWidth = 10;
+        Chart.defaults.plugins.legend.labels.padding = 12;
+
+        const COLORS = {
+            blue:   { bg: 'rgba(59,130,246,0.15)',  border: '#3b82f6' },
+            red:    { bg: 'rgba(239,68,68,0.15)',   border: '#ef4444' },
+            green:  { bg: 'rgba(34,197,94,0.15)',   border: '#22c55e' },
+            yellow: { bg: 'rgba(234,179,8,0.15)',   border: '#eab308' },
+            purple: { bg: 'rgba(168,85,247,0.15)',  border: '#a855f7' },
+            cyan:   { bg: 'rgba(6,182,212,0.15)',   border: '#06b6d4' },
+            orange: { bg: 'rgba(249,115,22,0.15)',  border: '#f97316' },
+            pink:   { bg: 'rgba(236,72,153,0.15)',  border: '#ec4899' },
+        };
+        const COLOR_LIST = Object.values(COLORS);
+
+        const chartOpts = (yLabel = '') => ({
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#1e293b',
+                    borderColor: '#334155',
+                    borderWidth: 1,
+                    titleColor: '#e2e8f0',
+                    bodyColor: '#94a3b8',
+                    padding: 10,
+                    cornerRadius: 6,
+                    callbacks: {
+                        label: function(ctx) {
+                            let v = ctx.parsed.y;
+                            if (v === null || v === undefined) return ctx.dataset.label + ': N/A';
+                            v = Number.isInteger(v) ? v : parseFloat(v.toFixed(2));
+                            return ctx.dataset.label + ': ' + v.toLocaleString();
+                        }
+                    },
+                },
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 20 } },
+                y: { beginAtZero: true, grid: { color: 'rgba(51,65,85,0.5)' }, title: yLabel ? { display: true, text: yLabel, color: '#94a3b8' } : { display: false }, ticks: { callback: v => Number.isInteger(v) ? v : parseFloat(v.toFixed(2)) } },
+            },
+        });
+
+        const chartOptsMultiLegend = (yLabel = '') => {
+            const opts = chartOpts(yLabel);
+            opts.plugins.legend = { display: true, position: 'top', align: 'start' };
+            return opts;
+        };
+
+        // ─── State ──────────────────────────────────────────────
         const basePath = '{{ rtrim(config("monitoring.dashboard.path", "monitoring"), "/") }}';
         let refreshTimer = null;
         let currentSlowType = '';
+        const charts = {};
 
-        // Tabs
+        // ─── Events ─────────────────────────────────────────────
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -198,7 +232,6 @@
                 fetchSlowLogs();
             });
         });
-
         document.getElementById('periodSelect').addEventListener('change', fetchData);
         document.getElementById('refreshSelect').addEventListener('change', () => {
             clearInterval(refreshTimer);
@@ -206,6 +239,7 @@
             if (sec > 0) refreshTimer = setInterval(fetchData, sec * 1000);
         });
 
+        // ─── Data fetching ──────────────────────────────────────
         function fetchData() {
             const minutes = document.getElementById('periodSelect').value;
             fetch(`/${basePath}/api/data?minutes=${minutes}`)
@@ -219,10 +253,7 @@
                     updateCharts(data.timeline);
                     document.getElementById('lastUpdate').textContent = 'Updated: ' + new Date().toLocaleTimeString();
                 })
-                .catch(() => {
-                    document.getElementById('statusDot').className = 'status-dot error';
-                });
-
+                .catch(() => { document.getElementById('statusDot').className = 'status-dot error'; });
             fetchSlowLogs();
         }
 
@@ -230,49 +261,37 @@
             const minutes = document.getElementById('periodSelect').value;
             let url = `/${basePath}/api/slow-logs?minutes=${minutes}&limit=50`;
             if (currentSlowType) url += `&type=${currentSlowType}`;
-
-            fetch(url)
-                .then(r => r.json())
-                .then(data => renderSlowLogs(data.data))
-                .catch(() => {});
+            fetch(url).then(r => r.json()).then(data => renderSlowLogs(data.data)).catch(() => {});
         }
 
+        // ─── Summary cards ──────────────────────────────────────
         function updateSummary(s) {
-            // Status dot
             const dot = document.getElementById('statusDot');
             if (s.error_rate > 5) dot.className = 'status-dot error';
             else if (s.error_rate > 1 || s.queue_depth_default > 100) dot.className = 'status-dot warn';
             else dot.className = 'status-dot ok';
 
-            // HTTP
             setVal('httpTotal', fmtNum(s.http_requests_total));
             setVal('httpSub', `2xx: ${fmtNum(s.http_requests_2xx)} | 4xx: ${fmtNum(s.http_requests_4xx)} | 5xx: ${fmtNum(s.http_requests_5xx)}`);
 
             const avg = s.http_avg_duration;
-            setVal('httpAvg', avg < 1000 ? avg + ' ms' : (avg / 1000).toFixed(1) + ' s', avg > 2000 ? 'red' : avg > 500 ? 'yellow' : 'green');
+            setVal('httpAvg', fmtMs(avg), avg > 2000 ? 'red' : avg > 500 ? 'yellow' : 'green');
             setVal('httpAvgSub', `max: ${fmtMs(s.http_max_duration)}`);
-
             setVal('errorRate', s.error_rate + '%', s.error_rate > 5 ? 'red' : s.error_rate > 1 ? 'yellow' : 'green');
             setVal('errorSub', `${fmtNum(s.http_requests_5xx)} errors`);
-
             setVal('slowReq', fmtNum(s.http_slow_requests), s.http_slow_requests > 10 ? 'red' : s.http_slow_requests > 0 ? 'yellow' : 'green');
 
-            // Queue
             const totalDepth = s.queue_depth_high + s.queue_depth_default + s.queue_depth_low;
             setVal('queueDepth', fmtNum(totalDepth), totalDepth > 100 ? 'red' : totalDepth > 20 ? 'yellow' : 'green');
             setVal('queueSub', `H: ${s.queue_depth_high} | D: ${s.queue_depth_default} | L: ${s.queue_depth_low}`);
-
             setVal('jobsProcessed', fmtNum(s.queue_jobs_processed), 'blue');
             setVal('jobsSub', `failed: ${fmtNum(s.queue_jobs_failed)}`);
 
-            // DB
             setVal('dbQueries', fmtNum(s.db_queries_total));
-            setVal('dbSub', `avg: ${s.db_avg_query_ms}ms | max: ${fmtMs(s.db_max_query_ms)}`);
-
+            setVal('dbSub', `avg: ${fmtMs(s.db_avg_query_ms)} | max: ${fmtMs(s.db_max_query_ms)}`);
             setVal('dbSlow', fmtNum(s.db_slow_queries), s.db_slow_queries > 10 ? 'red' : s.db_slow_queries > 0 ? 'yellow' : 'green');
             setVal('dbSlowSub', `above ${document.getElementById('periodSelect').selectedOptions[0].text}`);
 
-            // System
             setVal('cpuLoad', s.cpu_load !== null ? s.cpu_load : 'N/A', s.cpu_load > 5 ? 'red' : s.cpu_load > 2 ? 'yellow' : 'green');
             setVal('redisMem', s.redis_memory_mb !== null ? s.redis_memory_mb + ' MB' : 'N/A', 'cyan');
             setVal('redisMemSub', s.redis_clients !== null ? s.redis_clients + ' clients' : '');
@@ -280,20 +299,13 @@
             setVal('redisHitRate', s.redis_hit_rate !== null ? 'hit rate: ' + s.redis_hit_rate + '%' : '');
             setVal('diskFree', s.disk_free_gb !== null ? s.disk_free_gb + ' GB' : 'N/A', s.disk_free_gb < 2 ? 'red' : s.disk_free_gb < 5 ? 'yellow' : 'green');
 
-            // Custom metrics
             renderCustomMetrics(s.custom);
         }
 
         function renderCustomMetrics(custom) {
             const container = document.getElementById('customCards');
             const title = document.getElementById('customTitle');
-
-            if (!custom || Object.keys(custom).length === 0) {
-                container.innerHTML = '';
-                title.style.display = 'none';
-                return;
-            }
-
+            if (!custom || Object.keys(custom).length === 0) { container.innerHTML = ''; title.style.display = 'none'; return; }
             title.style.display = '';
             container.innerHTML = Object.entries(custom).map(([key, value]) => {
                 const label = formatMetricLabel(key);
@@ -303,143 +315,177 @@
             }).join('');
         }
 
-        function formatMetricLabel(key) {
-            return key
-                .replace(/_/g, ' ')
-                .replace(/\b(ms|mb|gb)\b/gi, m => m.toUpperCase())
-                .replace(/\b(avg|max|p95|api)\b/gi, m => m.toUpperCase())
-                .replace(/^\w/, c => c.toUpperCase());
-        }
-
-        function formatMetricValue(key, value) {
-            if (value === null || value === undefined) return 'N/A';
-            if (typeof value === 'string') return value;
-            if (key.includes('_ms')) return fmtMs(value);
-            if (key.includes('_mb')) return value + ' MB';
-            if (key.includes('_gb')) return value + ' GB';
-            if (key.includes('_rate')) return (value * 100).toFixed(1) + '%';
-            return fmtNum(value);
-        }
-
-        function getMetricColor(key, value) {
-            if (value === null || value === undefined) return '';
-            if (typeof value === 'string') {
-                if (value === 'running') return 'green';
-                if (value === 'inactive' || value === 'unknown') return 'red';
-                return '';
-            }
-            if (key.includes('error') && value > 0) return 'red';
-            if (key.includes('_rate_limit') && value > 0) return 'yellow';
-            if (key.includes('_status')) return '';
-            return '';
-        }
-
+        // ─── Built-in charts ────────────────────────────────────
         function updateCharts(timeline) {
             if (!timeline || timeline.length === 0) return;
+            const labels = timeline.map(d => d.time);
 
-            renderBarChart('chartRequests', timeline, 'requests', '--blue');
-            renderDualBarChart('chartDuration', timeline, 'avg_duration', 'max_duration', '--blue', '--red');
-            renderStackedBarChart('chartQueue', timeline, ['queue_high', 'queue_default', 'queue_low'], ['--red', '--yellow', '--blue']);
-            renderBarChart('chartDb', timeline, 'db_queries', '--purple');
+            // Requests
+            renderChart('chartRequests', labels, [
+                { label: 'Requests', data: timeline.map(d => d.requests), ...COLORS.blue, type: 'bar' },
+                { label: '5xx Errors', data: timeline.map(d => d.errors_5xx), ...COLORS.red, type: 'bar' },
+            ], chartOptsMultiLegend());
+
+            // Response time
+            renderChart('chartDuration', labels, [
+                { label: 'Avg', data: timeline.map(d => d.avg_duration), borderColor: COLORS.blue.border, backgroundColor: COLORS.blue.bg, type: 'line', fill: true, tension: 0.3, pointRadius: 0 },
+                { label: 'Max', data: timeline.map(d => d.max_duration), borderColor: COLORS.red.border, backgroundColor: 'transparent', type: 'line', borderDash: [4, 4], tension: 0.3, pointRadius: 0 },
+            ], chartOptsMultiLegend('ms'));
+
+            // Queue
+            renderChart('chartQueue', labels, [
+                { label: 'High', data: timeline.map(d => d.queue_high), ...COLORS.red, type: 'bar', stack: 'q' },
+                { label: 'Default', data: timeline.map(d => d.queue_default), ...COLORS.yellow, type: 'bar', stack: 'q' },
+                { label: 'Low', data: timeline.map(d => d.queue_low), ...COLORS.blue, type: 'bar', stack: 'q' },
+            ], (() => { const o = chartOptsMultiLegend(); o.scales.x.stacked = true; o.scales.y.stacked = true; return o; })());
+
+            // DB queries
+            renderChart('chartDb', labels, [
+                { label: 'Queries', data: timeline.map(d => d.db_queries), ...COLORS.purple, type: 'bar' },
+                { label: 'Slow', data: timeline.map(d => d.db_slow), ...COLORS.red, type: 'bar' },
+            ], chartOptsMultiLegend());
+
+            // Custom charts
+            renderCustomCharts(timeline, labels);
         }
 
-        function renderBarChart(containerId, data, key, color) {
-            const container = document.getElementById(containerId);
-            const max = Math.max(...data.map(d => d[key]), 1);
-            container.innerHTML = data.map(d => {
-                const h = Math.max((d[key] / max) * 100, 1);
-                return `<div class="bar" style="height:${h}%;background:var(${color})"><div class="bar-tooltip">${d.time}: ${fmtNum(d[key])}</div></div>`;
-            }).join('');
+        function renderChart(canvasId, labels, datasets, options) {
+            const ds = datasets.map(d => ({
+                label: d.label,
+                data: d.data,
+                backgroundColor: d.bg || d.backgroundColor || COLORS.blue.bg,
+                borderColor: d.border || d.borderColor || COLORS.blue.border,
+                borderWidth: d.type === 'line' ? 2 : 0,
+                type: d.type || 'bar',
+                fill: d.fill ?? (d.type !== 'line'),
+                tension: d.tension ?? 0,
+                pointRadius: d.pointRadius ?? 0,
+                pointHoverRadius: d.pointHoverRadius ?? 4,
+                borderDash: d.borderDash || [],
+                stack: d.stack,
+                order: d.type === 'line' ? 0 : 1,
+            }));
+
+            if (charts[canvasId]) {
+                charts[canvasId].data.labels = labels;
+                charts[canvasId].data.datasets.forEach((existing, i) => {
+                    if (ds[i]) existing.data = ds[i].data;
+                });
+                charts[canvasId].update('none');
+                return;
+            }
+
+            const canvas = document.getElementById(canvasId);
+            if (!canvas) return;
+            charts[canvasId] = new Chart(canvas, { type: 'bar', data: { labels, datasets: ds }, options });
         }
 
-        function renderDualBarChart(containerId, data, key1, key2, color1, color2) {
-            const container = document.getElementById(containerId);
-            const max = Math.max(...data.map(d => d[key2]), 1);
-            container.innerHTML = data.map(d => {
-                const h1 = Math.max((d[key1] / max) * 100, 1);
-                const h2 = Math.max((d[key2] / max) * 100, 1);
-                return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:1px;position:relative">
-                    <div class="bar" style="width:100%;height:${h2}%;background:var(${color2});opacity:0.3;position:absolute;bottom:0"><div class="bar-tooltip">${d.time}: max ${fmtMs(d[key2])}</div></div>
-                    <div class="bar" style="width:100%;height:${h1}%;background:var(${color1});position:absolute;bottom:0"><div class="bar-tooltip">${d.time}: avg ${fmtMs(d[key1])}</div></div>
-                </div>`;
-            }).join('');
-        }
+        // ─── Custom charts ──────────────────────────────────────
+        function renderCustomCharts(timeline, labels) {
+            const grid = document.getElementById('customChartsGrid');
+            const title = document.getElementById('customChartsTitle');
 
-        function renderStackedBarChart(containerId, data, keys, colors) {
-            const container = document.getElementById(containerId);
-            const max = Math.max(...data.map(d => keys.reduce((s, k) => s + d[k], 0)), 1);
-            container.innerHTML = data.map(d => {
-                const total = keys.reduce((s, k) => s + d[k], 0);
-                const segments = keys.map((k, i) => {
-                    const h = (d[k] / max) * 100;
-                    return h > 0 ? `<div style="width:100%;height:${h}%;background:var(${colors[i]})"></div>` : '';
-                }).join('');
-                return `<div style="flex:1;display:flex;flex-direction:column-reverse;height:100%;gap:0;position:relative">
-                    ${segments}
-                    <div class="bar-tooltip" style="display:none;position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:var(--bg);border:1px solid var(--border);padding:4px 8px;border-radius:4px;font-size:11px;white-space:nowrap;z-index:5">${d.time}: ${total}</div>
-                </div>`;
-            }).join('');
+            const customKeys = {};
+            timeline.forEach(row => Object.keys(row).forEach(k => { if (k.startsWith('c:')) customKeys[k] = true; }));
+            const keys = Object.keys(customKeys);
 
-            // Add hover for stacked
-            container.querySelectorAll(':scope > div').forEach(el => {
-                const tip = el.querySelector('.bar-tooltip');
-                el.addEventListener('mouseenter', () => tip.style.display = 'block');
-                el.addEventListener('mouseleave', () => tip.style.display = 'none');
+            if (keys.length === 0) { grid.innerHTML = ''; title.style.display = 'none'; return; }
+            title.style.display = '';
+
+            const groups = groupCustomKeys(keys);
+
+            // Destroy old custom charts
+            Object.keys(charts).forEach(k => {
+                if (k.startsWith('customChart_')) { charts[k].destroy(); delete charts[k]; }
+            });
+
+            grid.innerHTML = groups.map(g =>
+                `<div class="card"><div class="card-title">${escHtml(g.label)}</div><div class="chart-container"><canvas id="${g.id}"></canvas></div></div>`
+            ).join('');
+
+            groups.forEach(group => {
+                const datasets = group.keys.map((key, i) => {
+                    const c = COLOR_LIST[i % COLOR_LIST.length];
+                    const label = formatMetricLabel(key.replace('c:', ''));
+                    const isRate = key.includes('avg') || key.includes('_ms') || key.includes('_rate');
+                    return {
+                        label,
+                        data: timeline.map(d => d[key] || 0),
+                        backgroundColor: isRate ? c.bg : c.bg,
+                        borderColor: c.border,
+                        borderWidth: isRate ? 2 : 0,
+                        type: isRate ? 'line' : 'bar',
+                        fill: isRate,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                    };
+                });
+
+                const opts = chartOptsMultiLegend();
+                charts[group.id] = new Chart(document.getElementById(group.id), {
+                    type: 'bar',
+                    data: { labels, datasets },
+                    options: opts,
+                });
             });
         }
 
+        function groupCustomKeys(keys) {
+            const prefixMap = {};
+            keys.forEach(key => {
+                const clean = key.replace('c:', '');
+                const parts = clean.split('_');
+                const suffixes = ['calls', 'errors', 'avg', 'max', 'p95', 'total', 'count', 'requests', 'processed', 'dispatched', 'hits'];
+                let prefix = parts.length <= 2 ? parts[0] : (suffixes.includes(parts[1]) ? parts[0] : parts[0] + '_' + parts[1]);
+                if (!prefixMap[prefix]) prefixMap[prefix] = [];
+                prefixMap[prefix].push(key);
+            });
+
+            const groups = [];
+            const maxPerChart = 5;
+            Object.entries(prefixMap).forEach(([prefix, groupKeys]) => {
+                for (let i = 0; i < groupKeys.length; i += maxPerChart) {
+                    const chunk = groupKeys.slice(i, i + maxPerChart);
+                    const suffix = groupKeys.length > maxPerChart ? ` (${Math.floor(i/maxPerChart)+1})` : '';
+                    groups.push({ id: 'customChart_' + prefix + '_' + i, label: formatMetricLabel(prefix) + suffix, keys: chunk });
+                }
+            });
+            return groups;
+        }
+
+        // ─── Slow logs table ────────────────────────────────────
         function renderSlowLogs(logs) {
             const tbody = document.getElementById('slowLogsBody');
-            if (!logs || logs.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" class="no-data">No slow logs in this period</td></tr>';
-                return;
-            }
+            if (!logs || logs.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="no-data">No slow logs in this period</td></tr>'; return; }
             tbody.innerHTML = logs.map(log => `<tr>
                 <td><span class="badge badge-${log.type}">${log.type}</span></td>
                 <td><span class="badge badge-slow">${fmtMs(log.duration_ms)}</span></td>
-                <td>${log.type === 'request'
-                    ? `<strong>${log.method}</strong> ${escHtml(truncate(log.url, 70))}`
-                    : `<span class="sql-text">${escHtml(truncate(log.sql, 80))}</span>`
-                }</td>
+                <td>${log.type === 'request' ? `<strong>${log.method}</strong> ${escHtml(truncate(log.url, 70))}` : `<span class="sql-text">${escHtml(truncate(log.sql, 80))}</span>`}</td>
                 <td>${log.status_code ? statusBadge(log.status_code) : (log.connection || '-')}</td>
                 <td>${log.user_id || '-'}</td>
                 <td>${log.time}</td>
             </tr>`).join('');
         }
 
+        // ─── Helpers ────────────────────────────────────────────
         function setVal(id, value, colorClass) {
             const el = document.getElementById(id);
             if (!el) return;
             el.textContent = value;
-            if (colorClass && el.classList.contains('card-value')) {
-                el.className = 'card-value ' + colorClass;
-            }
+            if (colorClass && el.classList.contains('card-value')) el.className = 'card-value ' + colorClass;
         }
-
-        function fmtNum(n) {
-            if (n === null || n === undefined) return 'N/A';
-            if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
-            if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
-            return n.toString();
-        }
-
-        function fmtMs(ms) {
-            if (ms === null || ms === undefined) return 'N/A';
-            if (ms >= 1000) return (ms / 1000).toFixed(1) + 's';
-            return Math.round(ms) + 'ms';
-        }
-
+        function fmtNum(n) { if (n === null || n === undefined) return 'N/A'; if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return (n/1e3).toFixed(1)+'K'; return Number.isInteger(n) ? n.toString() : parseFloat(n.toFixed(2)).toString(); }
+        function fmtMs(ms) { if (ms === null || ms === undefined) return 'N/A'; if (ms >= 1000) return (ms/1000).toFixed(1)+'s'; return parseFloat(ms.toFixed(1))+'ms'; }
         function truncate(s, len) { return s && s.length > len ? s.substring(0, len) + '...' : (s || ''); }
         function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-        function statusBadge(code) {
-            const cls = code >= 500 ? 'badge-slow' : code >= 400 ? 'badge-request' : 'badge-ok';
-            return `<span class="badge ${cls}">${code}</span>`;
-        }
+        function statusBadge(code) { const cls = code >= 500 ? 'badge-slow' : code >= 400 ? 'badge-request' : 'badge-ok'; return `<span class="badge ${cls}">${code}</span>`; }
+        function formatMetricLabel(key) { return key.replace(/_/g, ' ').replace(/\b(ms|mb|gb)\b/gi, m => m.toUpperCase()).replace(/\b(avg|max|p95|api)\b/gi, m => m.toUpperCase()).replace(/^\w/, c => c.toUpperCase()); }
+        function formatMetricValue(key, value) { if (value === null || value === undefined) return 'N/A'; if (typeof value === 'string') return value; if (key.includes('_ms')) return fmtMs(value); if (key.includes('_mb')) return parseFloat(value.toFixed(1))+' MB'; if (key.includes('_gb')) return parseFloat(value.toFixed(1))+' GB'; if (key.includes('_rate')) return (value*100).toFixed(1)+'%'; return fmtNum(value); }
+        function getMetricColor(key, value) { if (value === null || value === undefined) return ''; if (typeof value === 'string') { if (value === 'running') return 'green'; if (value === 'inactive' || value === 'unknown') return 'red'; return ''; } if (key.includes('error') && value > 0) return 'red'; if (key.includes('rate_limit') && value > 0) return 'yellow'; return ''; }
 
-        // Initial load
+        // ─── Init ───────────────────────────────────────────────
         fetchData();
-
-        // Auto-refresh
         const initialRefresh = parseInt(document.getElementById('refreshSelect').value);
         if (initialRefresh > 0) refreshTimer = setInterval(fetchData, initialRefresh * 1000);
     </script>
