@@ -132,30 +132,49 @@ class DashboardController extends Controller
         $minutes = (int) $request->input('minutes', 60);
         $minutes = min($minutes, 1440);
         $type = $request->input('type');
-        $limit = min((int) $request->input('limit', 50), 200);
+        $perPage = min((int) $request->input('per_page', 25), 100);
+        $page = max((int) $request->input('page', 1), 1);
+        $sort = $request->input('sort', 'duration');
 
-        $query = MonitoringSlowLog::where('recorded_at', '>=', now()->subMinutes($minutes))
-            ->orderBy('duration_ms', 'desc')
-            ->limit($limit);
+        $query = MonitoringSlowLog::where('recorded_at', '>=', now()->subMinutes($minutes));
 
         if ($type) {
             $query->where('type', $type);
         }
 
-        $logs = $query->get()->map(fn ($log) => [
-            'id'          => $log->id,
-            'type'        => $log->type,
-            'duration_ms' => round($log->duration_ms, 1),
-            'time'        => $log->recorded_at->format('H:i:s'),
-            'method'      => $log->method,
-            'url'         => $log->url,
-            'route'       => $log->route,
-            'status_code' => $log->status_code,
-            'user_id'     => $log->user_id,
-            'sql'         => $log->sql,
-            'connection'  => $log->connection,
-        ]);
+        if ($sort === 'time') {
+            $query->orderBy('recorded_at', 'desc');
+        } else {
+            $query->orderBy('duration_ms', 'desc');
+        }
 
-        return response()->json(['data' => $logs]);
+        $total = $query->count();
+        $lastPage = max((int) ceil($total / $perPage), 1);
+        $page = min($page, $lastPage);
+
+        $logs = $query->offset(($page - 1) * $perPage)
+            ->limit($perPage)
+            ->get()
+            ->map(fn ($log) => [
+                'id'          => $log->id,
+                'type'        => $log->type,
+                'duration_ms' => round($log->duration_ms, 1),
+                'time'        => $log->recorded_at->format('H:i:s'),
+                'method'      => $log->method,
+                'url'         => $log->url,
+                'route'       => $log->route,
+                'status_code' => $log->status_code,
+                'user_id'     => $log->user_id,
+                'sql'         => $log->sql,
+                'connection'  => $log->connection,
+            ]);
+
+        return response()->json([
+            'data' => $logs,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total' => $total,
+            'last_page' => $lastPage,
+        ]);
     }
 }

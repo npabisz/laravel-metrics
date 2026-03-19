@@ -71,6 +71,17 @@
         .no-data { text-align: center; padding: 40px; color: var(--text-muted); }
         .refresh-indicator { font-size: 11px; color: var(--text-muted); }
         .sql-text { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; word-break: break-all; max-width: 500px; }
+        .slow-controls { display: flex; justify-content: space-between; align-items: center; }
+        .sort-controls { display: flex; gap: 4px; align-items: center; }
+        .sort-btn { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-size: 11px; cursor: pointer; transition: all 0.2s; }
+        .sort-btn:hover { color: var(--text); }
+        .sort-btn.active { color: var(--blue); border-color: var(--blue); background: rgba(59,130,246,0.1); }
+        .pagination { display: flex; gap: 6px; align-items: center; justify-content: center; padding: 12px 0 4px; }
+        .page-btn { background: var(--bg); color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+        .page-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
+        .page-btn:disabled { opacity: 0.3; cursor: default; }
+        .page-btn.active { color: var(--blue); border-color: var(--blue); }
+        .page-info { font-size: 11px; color: var(--text-muted); }
         @media (max-width: 768px) {
             .grid-4 { grid-template-columns: repeat(2, 1fr); }
             .grid-2 { grid-template-columns: 1fr; }
@@ -145,17 +156,26 @@
         <!-- Slow Logs -->
         <div class="section-title">Slow Logs</div>
         <div class="card">
-            <div class="tabs">
-                <div class="tab active" data-type="">All</div>
-                <div class="tab" data-type="request">Requests</div>
-                <div class="tab" data-type="query">Queries</div>
+            <div class="slow-controls">
+                <div class="tabs" style="margin-bottom:0; border-bottom:none;">
+                    <div class="tab active" data-type="">All</div>
+                    <div class="tab" data-type="request">Requests</div>
+                    <div class="tab" data-type="query">Queries</div>
+                </div>
+                <div class="sort-controls">
+                    <span style="font-size:11px;color:var(--text-muted);margin-right:4px;">Sort:</span>
+                    <button class="sort-btn active" data-sort="duration">Slowest</button>
+                    <button class="sort-btn" data-sort="time">Recent</button>
+                </div>
             </div>
+            <div style="border-bottom:1px solid var(--border); margin-bottom:16px;"></div>
             <div class="table-wrapper">
                 <table>
                     <thead><tr><th>Type</th><th>Duration</th><th>Detail</th><th>Status</th><th>User</th><th>Time</th></tr></thead>
                     <tbody id="slowLogsBody"><tr><td colspan="6" class="no-data">Loading...</td></tr></tbody>
                 </table>
             </div>
+            <div class="pagination" id="slowLogsPagination"></div>
         </div>
     </div>
 
@@ -221,6 +241,8 @@
         const basePath = '{{ rtrim(config("monitoring.dashboard.path", "monitoring"), "/") }}';
         let refreshTimer = null;
         let currentSlowType = '';
+        let currentSlowSort = 'duration';
+        let currentSlowPage = 1;
         const charts = {};
 
         // ─── Events ─────────────────────────────────────────────
@@ -229,10 +251,20 @@
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 currentSlowType = tab.dataset.type;
+                currentSlowPage = 1;
                 fetchSlowLogs();
             });
         });
-        document.getElementById('periodSelect').addEventListener('change', fetchData);
+        document.querySelectorAll('.sort-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentSlowSort = btn.dataset.sort;
+                currentSlowPage = 1;
+                fetchSlowLogs();
+            });
+        });
+        document.getElementById('periodSelect').addEventListener('change', () => { currentSlowPage = 1; fetchData(); });
         document.getElementById('refreshSelect').addEventListener('change', () => {
             clearInterval(refreshTimer);
             const sec = parseInt(document.getElementById('refreshSelect').value);
@@ -259,9 +291,12 @@
 
         function fetchSlowLogs() {
             const minutes = document.getElementById('periodSelect').value;
-            let url = `/${basePath}/api/slow-logs?minutes=${minutes}&limit=50`;
+            let url = `/${basePath}/api/slow-logs?minutes=${minutes}&per_page=25&sort=${currentSlowSort}&page=${currentSlowPage}`;
             if (currentSlowType) url += `&type=${currentSlowType}`;
-            fetch(url).then(r => r.json()).then(data => renderSlowLogs(data.data)).catch(() => {});
+            fetch(url).then(r => r.json()).then(data => {
+                renderSlowLogs(data.data);
+                renderPagination(data);
+            }).catch(() => {});
         }
 
         // ─── Summary cards ──────────────────────────────────────
@@ -381,6 +416,16 @@
         }
 
         // ─── Custom charts ──────────────────────────────────────
+        function getCustomMetricColor(key, index) {
+            const k = key.toLowerCase();
+            if (k.includes('error') || k.includes('5xx') || k.includes('fail') || k.includes('slow') || k.includes('max') || k.includes('high') || k.includes('timeout')) {
+                return COLORS.red;
+            }
+            // Skip red (index 1) for non-error metrics
+            const safeColors = [COLORS.blue, COLORS.green, COLORS.yellow, COLORS.purple, COLORS.cyan, COLORS.orange, COLORS.pink];
+            return safeColors[index % safeColors.length];
+        }
+
         function renderCustomCharts(timeline, labels) {
             const grid = document.getElementById('customChartsGrid');
             const title = document.getElementById('customChartsTitle');
@@ -404,14 +449,16 @@
             ).join('');
 
             groups.forEach(group => {
-                const datasets = group.keys.map((key, i) => {
-                    const c = COLOR_LIST[i % COLOR_LIST.length];
+                let nonErrorIndex = 0;
+                const datasets = group.keys.map((key) => {
                     const label = formatMetricLabel(key.replace('c:', ''));
                     const isRate = key.includes('avg') || key.includes('_ms') || key.includes('_rate');
+                    const isError = /error|5xx|fail|slow|max|high|timeout/i.test(key);
+                    const c = isError ? COLORS.red : getCustomMetricColor(key, nonErrorIndex++);
                     return {
                         label,
                         data: timeline.map(d => d[key] || 0),
-                        backgroundColor: isRate ? c.bg : c.bg,
+                        backgroundColor: c.bg,
                         borderColor: c.border,
                         borderWidth: isRate ? 2 : 0,
                         type: isRate ? 'line' : 'bar',
@@ -432,15 +479,62 @@
         }
 
         function groupCustomKeys(keys) {
-            const prefixMap = {};
-            keys.forEach(key => {
-                const clean = key.replace('c:', '');
-                const parts = clean.split('_');
-                const suffixes = ['calls', 'errors', 'avg', 'max', 'p95', 'total', 'count', 'requests', 'processed', 'dispatched', 'hits'];
-                let prefix = parts.length <= 2 ? parts[0] : (suffixes.includes(parts[1]) ? parts[0] : parts[0] + '_' + parts[1]);
-                if (!prefixMap[prefix]) prefixMap[prefix] = [];
-                prefixMap[prefix].push(key);
+            const cleanKeys = keys.map(k => k.replace('c:', ''));
+
+            // Find the longest prefix shared with at least one other key
+            const keyToPrefix = {};
+            cleanKeys.forEach(key => {
+                const parts = key.split('_');
+                let bestPrefix = parts[0];
+                for (let len = parts.length - 1; len >= 1; len--) {
+                    const prefix = parts.slice(0, len).join('_');
+                    if (cleanKeys.some(other => other !== key && other.startsWith(prefix + '_'))) {
+                        bestPrefix = prefix;
+                        break;
+                    }
+                }
+                keyToPrefix[key] = bestPrefix;
             });
+
+            // Build initial groups
+            const prefixMap = {};
+            cleanKeys.forEach(key => {
+                const p = keyToPrefix[key];
+                if (!prefixMap[p]) prefixMap[p] = [];
+                prefixMap[p].push('c:' + key);
+            });
+
+            // Merge small groups (<=2 items) into the closest larger group sharing a common first segment
+            let changed = true;
+            while (changed) {
+                changed = false;
+                const entries = Object.entries(prefixMap);
+                for (const [prefix, items] of entries) {
+                    if (!prefixMap[prefix] || items.length > 2) continue;
+                    const parts = prefix.split('_');
+                    let bestTarget = null, bestCommon = 0;
+                    for (const [other] of entries) {
+                        if (other === prefix || !prefixMap[other]) continue;
+                        const op = other.split('_');
+                        let common = 0;
+                        while (common < parts.length && common < op.length && parts[common] === op[common]) common++;
+                        if (common > bestCommon) { bestCommon = common; bestTarget = other; }
+                    }
+                    if (bestTarget && bestCommon >= 1) {
+                        prefixMap[bestTarget].push(...items);
+                        delete prefixMap[prefix];
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+
+            // Combine remaining single-item groups into "Other"
+            const singles = [];
+            Object.entries(prefixMap).forEach(([prefix, items]) => {
+                if (items.length === 1) { singles.push(...items); delete prefixMap[prefix]; }
+            });
+            if (singles.length > 0) prefixMap['other'] = singles;
 
             const groups = [];
             const maxPerChart = 5;
@@ -467,6 +561,24 @@
                 <td>${log.time}</td>
             </tr>`).join('');
         }
+
+        function renderPagination(data) {
+            const container = document.getElementById('slowLogsPagination');
+            if (!data || data.last_page <= 1) { container.innerHTML = ''; return; }
+            const { page, last_page, total } = data;
+            let html = `<button class="page-btn" onclick="goToPage(1)" ${page <= 1 ? 'disabled' : ''}>&laquo;</button>`;
+            html += `<button class="page-btn" onclick="goToPage(${page - 1})" ${page <= 1 ? 'disabled' : ''}>&lsaquo;</button>`;
+            const start = Math.max(1, page - 2);
+            const end = Math.min(last_page, page + 2);
+            for (let i = start; i <= end; i++) {
+                html += `<button class="page-btn ${i === page ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+            }
+            html += `<button class="page-btn" onclick="goToPage(${page + 1})" ${page >= last_page ? 'disabled' : ''}>&rsaquo;</button>`;
+            html += `<button class="page-btn" onclick="goToPage(${last_page})" ${page >= last_page ? 'disabled' : ''}>&raquo;</button>`;
+            html += `<span class="page-info">${total} total</span>`;
+            container.innerHTML = html;
+        }
+        function goToPage(p) { currentSlowPage = p; fetchSlowLogs(); }
 
         // ─── Helpers ────────────────────────────────────────────
         function setVal(id, value, colorClass) {
