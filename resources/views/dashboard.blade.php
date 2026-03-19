@@ -528,11 +528,8 @@
                 }
             });
 
-            // Auto-group unclaimed keys
-            const unclaimed = allKeys.filter(k => !claimed.has(k));
-            if (unclaimed.length > 0) {
-                autoGroupKeys(unclaimed).forEach(g => groups.push(g));
-            }
+            // Unclaimed keys are intentionally excluded when custom_charts is defined.
+            // They are still visible as summary cards above the charts.
 
             return groups;
         }
