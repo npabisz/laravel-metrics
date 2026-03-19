@@ -118,14 +118,20 @@ class MonitoringService
 
         try {
             $redis = Redis::connection($this->redisConnection);
-            $pattern = $this->redisPrefix . $group . ':*';
-            $prefixLen = strlen($this->redisPrefix . $group . ':');
+
+            // Get the Redis connection prefix (e.g. "laravel_database_")
+            // so we can build the correct SCAN pattern and strip it from results.
+            $connectionPrefix = $this->getRedisConnectionPrefix($redis);
+
+            $monitoringPrefix = $this->redisPrefix . $group . ':';
+            $scanPattern = $connectionPrefix . $monitoringPrefix . '*';
+            $stripLen = strlen($connectionPrefix . $monitoringPrefix);
 
             $cursor = null;
             $keys = [];
 
             do {
-                $result = $redis->scan($cursor, ['match' => $pattern, 'count' => 100]);
+                $result = $redis->scan($cursor, ['match' => $scanPattern, 'count' => 100]);
 
                 if ($result === false) {
                     break;
@@ -138,25 +144,59 @@ class MonitoringService
                 }
             } while ($cursor != 0);
 
-            foreach ($keys as $key) {
-                $shortKey = substr($key, $prefixLen);
-                $type = $redis->type($key);
+            foreach ($keys as $fullKey) {
+                $shortKey = substr($fullKey, $stripLen);
+
+                // Strip connection prefix for commands (Predis/phpredis auto-prefix them)
+                $commandKey = substr($fullKey, strlen($connectionPrefix));
+
+                $type = $redis->type($commandKey);
 
                 // phpredis returns int type constants, predis returns strings
                 if ($type === 'list' || $type === 3) {
-                    $values = $redis->lrange($key, 0, -1);
+                    $values = $redis->lrange($commandKey, 0, -1);
                     $data[$shortKey] = json_encode(array_map('floatval', $values));
                 } else {
-                    $data[$shortKey] = $redis->get($key);
+                    $data[$shortKey] = $redis->get($commandKey);
                 }
 
-                $redis->del($key);
+                $redis->del($commandKey);
             }
         } catch (\Throwable $e) {
             // Silently fail
         }
 
         return $data;
+    }
+
+    /**
+     * Get the prefix configured on the Redis connection.
+     */
+    protected function getRedisConnectionPrefix($redis): string
+    {
+        try {
+            $client = $redis->client();
+
+            // Predis
+            if ($client instanceof \Predis\Client) {
+                $options = $client->getOptions();
+
+                if (isset($options->prefix)) {
+                    return (string) $options->prefix->getPrefix();
+                }
+
+                return '';
+            }
+
+            // phpredis
+            if ($client instanceof \Redis) {
+                return $client->getOption(\Redis::OPT_PREFIX) ?: '';
+            }
+        } catch (\Throwable $e) {
+            // Fallback
+        }
+
+        return '';
     }
 
     /**
