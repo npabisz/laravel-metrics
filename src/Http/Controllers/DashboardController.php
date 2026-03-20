@@ -12,8 +12,10 @@ class DashboardController extends Controller
 {
     public function index()
     {
+        $customMetrics = config('monitoring.dashboard.custom_metrics', []);
+
         return view('monitoring::dashboard', [
-            'customCharts' => config('monitoring.dashboard.custom_charts', []),
+            'customCharts' => $customMetrics,
         ]);
     }
 
@@ -116,10 +118,11 @@ class DashboardController extends Controller
         $latest = $all->last();
         $result = [];
 
+        $gaugeKeys = $this->getGaugeKeys();
         $gaugePattern = $this->buildGaugePattern();
 
         foreach ($allKeys as $key) {
-            if (preg_match($gaugePattern, $key)) {
+            if (isset($gaugeKeys[$key]) || preg_match($gaugePattern, $key)) {
                 $result[$key] = $latest[$key] ?? null;
             } else {
                 $result[$key] = $all->sum(fn ($c) => $c[$key] ?? 0);
@@ -127,6 +130,24 @@ class DashboardController extends Controller
         }
 
         return $result;
+    }
+
+    protected function getGaugeKeys(): array
+    {
+        $customMetrics = config('monitoring.dashboard.custom_metrics', []);
+        $keys = [];
+
+        foreach ($customMetrics as $group) {
+            if (empty($group['gauge'])) {
+                continue;
+            }
+
+            foreach ($group['keys'] ?? [] as $pattern) {
+                $keys[$pattern] = true;
+            }
+        }
+
+        return $keys;
     }
 
     protected function buildGaugePattern(): string
@@ -137,10 +158,7 @@ class DashboardController extends Controller
             '_ops_per_sec', 'active_',
         ];
 
-        $custom = config('monitoring.dashboard.gauge_patterns', []);
-        $all = array_merge($builtIn, $custom);
-
-        $escaped = array_map(fn ($p) => preg_quote($p, '/'), $all);
+        $escaped = array_map(fn ($p) => preg_quote($p, '/'), $builtIn);
 
         return '/(' . implode('|', $escaped) . ')/';
     }

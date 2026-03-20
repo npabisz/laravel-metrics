@@ -135,68 +135,45 @@ return [
 
         /*
         |----------------------------------------------------------------------
-        | Gauge Patterns
+        | Custom Metrics
         |----------------------------------------------------------------------
-        | Custom metric keys matching these patterns are treated as gauges
-        | (use latest value) instead of counters (summed) in summary cards.
+        | Define how custom metrics are displayed in the dashboard.
+        | Each entry creates one chart panel and controls how matched
+        | metrics are aggregated and formatted in summary cards.
         |
-        | Built-in patterns already handle: *_avg_ms, *_max_ms, *_p95_*,
-        | *_hit_rate, *_status, *_load, *_count, *_size_mb, *_free_gb,
-        | *_memory_mb, *_clients, *_ops_per_sec, active_*
-        |
-        | Add your own patterns here for app-specific gauge metrics.
-        */
-        'gauge_patterns' => [
-            // '_percent', '_mbps', 'tcp_',
-        ],
-
-        /*
-        |----------------------------------------------------------------------
-        | Custom Timeline Charts
-        |----------------------------------------------------------------------
-        | Define how custom metrics are grouped into charts.
         | When empty (default), metrics are auto-grouped by shared prefix.
         |
-        | Each entry creates one chart panel. Metrics matching the keys
-        | array are included. Use '*' suffix for wildcard (e.g. 'api_*').
-        |
-        | Colors are optional. Without explicit colors, error-like metrics
-        | (error, fail, max, slow, high, timeout, 5xx) automatically get
-        | red, and others cycle through blue, green, yellow, purple, etc.
-        |
-        | Colors can be defined as:
-        |   - Indexed array: ['blue', 'red', 'green'] — applied by position
-        |   - Keyed map: ['checkout_errors' => 'red', 'checkout_*' => 'blue']
-        |     Exact keys are checked first, then wildcard patterns.
-        |
-        | Available colors: blue, red, green, yellow, purple, cyan, orange, pink
-        |
-        | Chart type (optional):
-        |   'type' => 'line'  — line chart (good for gauges: CPU %, memory, throughput)
-        |   'type' => 'bar'   — bar chart (default, good for counters: requests, errors)
+        | Options:
+        |   'label'  — chart title (required)
+        |   'keys'   — metric keys to include, supports '*' wildcard (required)
+        |   'colors' — optional, indexed array or keyed map
+        |              Available: blue, red, green, yellow, purple, cyan, orange, pink
+        |   'type'   — 'bar' (default) or 'line'
+        |   'gauge'  — true to use latest value instead of sum in summary cards
+        |   'format' — ['suffix' => '%', 'decimals' => 1, 'multiply' => 1]
         |
         | Example:
         |   [
         |       'label'  => 'Checkout',
-        |       'keys'   => ['checkout_requests', 'checkout_errors', 'checkout_avg_duration_ms'],
+        |       'keys'   => ['checkout_requests', 'checkout_errors'],
         |       'colors' => ['checkout_errors' => 'red', 'checkout_*' => 'blue'],
         |   ],
         |   [
         |       'label'  => 'CPU & Memory',
         |       'keys'   => ['cpu_usage_percent', 'memory_usage_percent'],
         |       'type'   => 'line',
+        |       'gauge'  => true,
+        |       'format' => ['suffix' => '%'],
         |   ],
         |   [
-        |       'label'  => 'Google API',
-        |       'keys'   => ['google_api_*'],
-        |   ],
-        |   [
-        |       'label'  => 'Webhooks',
-        |       'keys'   => ['webhook_*'],
-        |       'colors' => ['blue', 'green', 'yellow', 'purple', 'cyan'],
+        |       'label'  => 'Network Throughput',
+        |       'keys'   => ['net_rx_mbps', 'net_tx_mbps'],
+        |       'type'   => 'line',
+        |       'gauge'  => true,
+        |       'format' => ['suffix' => ' Mbps', 'decimals' => 2],
         |   ],
         */
-        'custom_charts' => [],
+        'custom_metrics' => [],
     ],
 
     /*

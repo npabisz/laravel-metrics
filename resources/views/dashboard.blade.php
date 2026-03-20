@@ -644,7 +644,32 @@
         function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
         function statusBadge(code) { const cls = code >= 500 ? 'badge-slow' : code >= 400 ? 'badge-request' : 'badge-ok'; return `<span class="badge ${cls}">${code}</span>`; }
         function formatMetricLabel(key) { return key.replace(/_/g, ' ').replace(/\b(ms|mb|gb)\b/gi, m => m.toUpperCase()).replace(/\b(avg|max|p95|api)\b/gi, m => m.toUpperCase()).replace(/^\w/, c => c.toUpperCase()); }
-        function formatMetricValue(key, value) { if (value === null || value === undefined) return 'N/A'; if (typeof value === 'string') return value; if (key.includes('_ms')) return fmtMs(value); if (key.includes('_mb')) return parseFloat(value.toFixed(1))+' MB'; if (key.includes('_gb')) return parseFloat(value.toFixed(1))+' GB'; if (key.includes('_rate')) return (value*100).toFixed(1)+'%'; return fmtNum(value); }
+        function formatMetricValue(key, value) {
+            if (value === null || value === undefined) return 'N/A';
+            if (typeof value === 'string') return value;
+            // Check custom formats from config
+            const fmt = findCustomFormat(key);
+            if (fmt) {
+                let v = value;
+                if (fmt.multiply) v = v * fmt.multiply;
+                const dec = fmt.decimals !== undefined ? fmt.decimals : 1;
+                return parseFloat(v.toFixed(dec)) + (fmt.suffix || '');
+            }
+            // Built-in formats
+            if (key.includes('_ms')) return fmtMs(value);
+            if (key.includes('_mb')) return parseFloat(value.toFixed(1))+' MB';
+            if (key.includes('_gb')) return parseFloat(value.toFixed(1))+' GB';
+            if (key.includes('_rate')) return (value*100).toFixed(1)+'%';
+            return fmtNum(value);
+        }
+        function findCustomFormat(key) {
+            for (const cfg of customChartConfig) {
+                if (!cfg.format) continue;
+                const keys = cfg.keys || [];
+                if (keys.some(pattern => matchesPattern(key, pattern))) return cfg.format;
+            }
+            return null;
+        }
         function getMetricColor(key, value) { if (value === null || value === undefined) return ''; if (typeof value === 'string') { if (value === 'running') return 'green'; if (value === 'inactive' || value === 'unknown') return 'red'; return ''; } if (key.includes('error') && value > 0) return 'red'; if (key.includes('rate_limit') && value > 0) return 'yellow'; return ''; }
 
         // ─── Init ───────────────────────────────────────────────
