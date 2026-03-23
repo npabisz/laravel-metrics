@@ -182,8 +182,8 @@ class DashboardController extends Controller
     {
         $builtIn = [
             'avg_ms', 'max_ms', 'p95_', 'hit_rate', '_status', '_load',
-            '_count', '_size_mb', '_free_gb', '_memory_mb', '_clients',
-            '_ops_per_sec', 'active_',
+            '_count', '_size_mb', '_total_mb', '_free_gb', '_memory_mb', '_clients',
+            '_ops_per_sec', 'active_', '_percent', '_mbps',
         ];
 
         $escaped = array_map(fn ($p) => preg_quote($p, '/'), $builtIn);
