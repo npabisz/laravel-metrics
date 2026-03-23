@@ -51,7 +51,7 @@
         .grid { display: grid; gap: 16px; }
         .grid-4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
         .grid-2 { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
-        .grid-3 { grid-template-columns: repeat(3, 1fr); }
+        .grid-3 { grid-template-columns: repeat(3, 1fr); margin-top: 16px; }
         .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
         .card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; }
         .card-value { font-size: 28px; font-weight: 700; line-height: 1.2; }
