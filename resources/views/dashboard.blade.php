@@ -51,6 +51,7 @@
         .grid { display: grid; gap: 16px; }
         .grid-4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
         .grid-2 { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
+        .grid-3 { grid-template-columns: repeat(3, 1fr); }
         .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
         .card-title { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 8px; }
         .card-value { font-size: 28px; font-weight: 700; line-height: 1.2; }
@@ -103,10 +104,14 @@
         .ranked-list li:nth-child(2) .rank { color: var(--yellow); }
         .ranked-list li:nth-child(3) .rank { color: var(--green); }
         .ranked-list .no-data-row { color: var(--text-muted); justify-content: center; }
+        .ranked-list-card { padding: 0; overflow: hidden; margin-bottom: 16px; }
 
+        @media (max-width: 1024px) {
+            .grid-3 { grid-template-columns: repeat(2, 1fr); }
+        }
         @media (max-width: 768px) {
             .grid-4 { grid-template-columns: repeat(2, 1fr); }
-            .grid-2 { grid-template-columns: 1fr; }
+            .grid-2, .grid-3 { grid-template-columns: 1fr; }
             .view-tabs { padding: 0 12px; }
             .view-tab { padding: 8px 14px; font-size: 12px; }
         }
@@ -263,18 +268,34 @@
         }
 
         function buildViewSections(view, viewIndex) {
-            return (view.sections || []).map((section, si) => {
+            const sections = view.sections || [];
+            let html = '';
+            let chartBuffer = [];
+
+            function flushCharts() {
+                if (chartBuffer.length === 0) return;
+                html += `<div class="grid grid-3">${chartBuffer.join('')}</div>`;
+                chartBuffer = [];
+            }
+
+            sections.forEach((section, si) => {
                 const sectionId = `v${viewIndex}_s${si}`;
-                switch (section.type) {
-                    case 'built-in':         return buildBuiltInSection(section, sectionId);
-                    case 'cards':            return buildCardsSection(section, sectionId);
-                    case 'list':             return buildListSection(section, sectionId);
-                    case 'chart':            return buildChartSection(section, sectionId);
-                    case 'slow-logs':        return buildSlowLogsSection(sectionId);
-                    case 'all-custom-cards': return buildAllCustomCardsSection(sectionId);
-                    default: return '';
+                if (section.type === 'chart') {
+                    chartBuffer.push(buildChartSection(section, sectionId));
+                } else {
+                    flushCharts();
+                    switch (section.type) {
+                        case 'built-in':         html += buildBuiltInSection(section, sectionId); break;
+                        case 'cards':            html += buildCardsSection(section, sectionId); break;
+                        case 'list':             html += buildListSection(section, sectionId); break;
+                        case 'slow-logs':        html += buildSlowLogsSection(sectionId); break;
+                        case 'all-custom-cards': html += buildAllCustomCardsSection(sectionId); break;
+                    }
                 }
-            }).join('');
+            });
+
+            flushCharts();
+            return html;
         }
 
         function buildBuiltInSection(section, sectionId) {
@@ -347,16 +368,13 @@
 
         function buildChartSection(section, sectionId) {
             const label = section.label || 'Chart';
-            return `<div class="section-title">${escHtml(label)}</div>
-                <div class="grid grid-2">
-                    <div class="card" style="grid-column: span 2"><div class="card-title">${escHtml(label)}</div>
+            return `<div class="card custom-chart-card"><div class="card-title">${escHtml(label)}</div>
                     <div class="chart-container"><canvas class="custom-chart" id="chart_${sectionId}"
                         data-keys='${escAttr(JSON.stringify(section.keys || []))}'
                         data-colors='${escAttr(JSON.stringify(section.colors || null))}'
                         data-chart-type='${section.chart_type || "bar"}'
                         data-gauge='${section.gauge ? "1" : "0"}'
-                    ></canvas></div></div>
-                </div>`;
+                    ></canvas></div></div>`;
         }
 
         function buildSlowLogsSection(sectionId) {

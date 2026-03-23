@@ -141,10 +141,18 @@ class DashboardController extends Controller
         $gaugePattern = $this->buildGaugePattern();
 
         foreach ($allKeys as $key) {
+            $latestValue = $latest[$key] ?? null;
+
+            // Skip non-numeric values (e.g. domain names stored as strings)
+            if ($latestValue !== null && !is_numeric($latestValue)) {
+                $result[$key] = $latestValue;
+                continue;
+            }
+
             if (isset($gaugeKeys[$key]) || preg_match($gaugePattern, $key)) {
-                $result[$key] = $latest[$key] ?? null;
+                $result[$key] = $latestValue;
             } else {
-                $result[$key] = $all->sum(fn ($c) => $c[$key] ?? 0);
+                $result[$key] = $all->sum(fn ($c) => is_numeric($c[$key] ?? null) ? $c[$key] : 0);
             }
         }
 
