@@ -9,26 +9,29 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
-use Npabisz\LaravelMetrics\Commands\MonitoringAlertCommand;
-use Npabisz\LaravelMetrics\Commands\MonitoringCleanCommand;
-use Npabisz\LaravelMetrics\Commands\MonitoringCollectCommand;
-use Npabisz\LaravelMetrics\Commands\MonitoringStatusCommand;
+use Npabisz\LaravelMetrics\Commands\MetricsAggregateHourlyCommand;
+use Npabisz\LaravelMetrics\Commands\MetricsAlertCommand;
+use Npabisz\LaravelMetrics\Commands\MetricsCleanCommand;
+use Npabisz\LaravelMetrics\Commands\MetricsCollectCommand;
+use Npabisz\LaravelMetrics\Commands\MetricsStatusCommand;
 use Npabisz\LaravelMetrics\Listeners\QueryListener;
 use Npabisz\LaravelMetrics\Middleware\RequestMonitor;
-use Npabisz\LaravelMetrics\Services\MonitoringService;
+use Npabisz\LaravelMetrics\Services\MetricAggregator;
+use Npabisz\LaravelMetrics\Services\MetricsService;
 
-class MonitoringServiceProvider extends ServiceProvider
+class MetricsServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/monitoring.php', 'monitoring');
+        $this->mergeConfigFrom(__DIR__ . '/../config/metrics.php', 'metrics');
 
-        $this->app->singleton(MonitoringService::class);
+        $this->app->singleton(MetricsService::class);
+        $this->app->singleton(MetricAggregator::class);
     }
 
     public function boot(): void
     {
-        if (!config('monitoring.enabled', true)) {
+        if (!config('metrics.enabled', true)) {
             return;
         }
 
@@ -45,7 +48,7 @@ class MonitoringServiceProvider extends ServiceProvider
 
     protected function registerViews(): void
     {
-        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'monitoring');
+        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'metrics');
 
         if ($this->app->runningInConsole()) {
             $this->publishes([
@@ -58,7 +61,7 @@ class MonitoringServiceProvider extends ServiceProvider
     {
         if ($this->app->runningInConsole()) {
             $this->publishes([
-                __DIR__ . '/../config/monitoring.php' => config_path('monitoring.php'),
+                __DIR__ . '/../config/metrics.php' => config_path('metrics.php'),
             ], 'monitoring-config');
 
             $this->publishes([
@@ -71,10 +74,11 @@ class MonitoringServiceProvider extends ServiceProvider
     {
         if ($this->app->runningInConsole()) {
             $this->commands([
-                MonitoringCollectCommand::class,
-                MonitoringCleanCommand::class,
-                MonitoringStatusCommand::class,
-                MonitoringAlertCommand::class,
+                MetricsCollectCommand::class,
+                MetricsCleanCommand::class,
+                MetricsStatusCommand::class,
+                MetricsAlertCommand::class,
+                MetricsAggregateHourlyCommand::class,
             ]);
         }
     }
@@ -87,7 +91,7 @@ class MonitoringServiceProvider extends ServiceProvider
             if ($this->app->runningInConsole()) {
                 $schedule = $this->app->make(Schedule::class);
                 $schedule->command('monitoring:collect')->everyMinute();
-                $alertInterval = (int) config('monitoring.notifications.interval', 1);
+                $alertInterval = (int) config('metrics.notifications.interval', 1);
                 match (true) {
                     $alertInterval <= 1  => $schedule->command('monitoring:alert')->everyMinute(),
                     $alertInterval <= 5  => $schedule->command('monitoring:alert')->everyFiveMinutes(),
@@ -96,6 +100,7 @@ class MonitoringServiceProvider extends ServiceProvider
                     $alertInterval <= 30 => $schedule->command('monitoring:alert')->everyThirtyMinutes(),
                     default              => $schedule->command('monitoring:alert')->hourly(),
                 };
+                $schedule->command('monitoring:aggregate-hourly')->hourly();
                 $schedule->command('monitoring:clean')->dailyAt('04:00');
             }
         });
@@ -103,11 +108,11 @@ class MonitoringServiceProvider extends ServiceProvider
 
     protected function registerMiddleware(): void
     {
-        if (!config('monitoring.track_requests', true)) {
+        if (!config('metrics.track_requests', true)) {
             return;
         }
 
-        $group = config('monitoring.middleware_group');
+        $group = config('metrics.middleware_group');
 
         if ($group) {
             // Append to a specific middleware group (works on all Laravel versions)
@@ -141,7 +146,7 @@ class MonitoringServiceProvider extends ServiceProvider
 
     protected function registerQueryListener(): void
     {
-        if (!config('monitoring.track_queries', true)) {
+        if (!config('metrics.track_queries', true)) {
             return;
         }
 
@@ -150,21 +155,21 @@ class MonitoringServiceProvider extends ServiceProvider
 
     protected function registerRoutes(): void
     {
-        if (!config('monitoring.routes.enabled', false)) {
+        if (!config('metrics.routes.enabled', false)) {
             return;
         }
 
-        Route::prefix(config('monitoring.routes.prefix', 'api/monitoring'))
+        Route::prefix(config('metrics.routes.prefix', 'api/monitoring'))
             ->group(__DIR__ . '/../routes/api.php');
     }
 
     protected function registerDashboard(): void
     {
-        if (!config('monitoring.dashboard.enabled', true)) {
+        if (!config('metrics.dashboard.enabled', true)) {
             return;
         }
 
-        Route::prefix(config('monitoring.dashboard.path', 'monitoring'))
+        Route::prefix(config('metrics.dashboard.path', 'metrics'))
             ->middleware('web')
             ->group(__DIR__ . '/../routes/web.php');
     }
@@ -174,12 +179,12 @@ class MonitoringServiceProvider extends ServiceProvider
      */
     protected function registerGate(): void
     {
-        Gate::define('viewMonitoring', function ($user = null) {
+        Gate::define('viewMetrics', function ($user = null) {
             if ($this->app->environment('local')) {
                 return true;
             }
 
-            $allowedIPs = config('monitoring.allowed_ips');
+            $allowedIPs = config('metrics.allowed_ips');
 
             if (empty($allowedIPs)) {
                 return false;

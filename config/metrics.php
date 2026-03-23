@@ -93,6 +93,32 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Custom Metric Aggregation
+    |--------------------------------------------------------------------------
+    | Defines how custom metrics are aggregated for hourly rollups and
+    | dashboard summaries. Each entry maps a key pattern to a strategy.
+    |
+    | Strategies:
+    |   'sum'     — sum across samples (default for counters)
+    |   'avg'     — weighted average using weight_key (e.g. _calls)
+    |   'max'     — maximum value across samples
+    |   'latest'  — use latest sample value (gauges/snapshots)
+    |
+    | Patterns support '*' wildcards. First match wins.
+    | Keys not matching any pattern are auto-detected:
+    |   *_avg_*  → avg (weight auto-discovered from *_calls/*_requests/*_count)
+    |   *_max_*, *_p95_*, *_p99_* → max
+    |   Known gauge suffixes (_percent, _mb, _count, etc.) → latest
+    |   Everything else → sum
+    */
+    'aggregation' => [
+        // Example:
+        // ['pattern' => 'my_custom_avg', 'strategy' => 'avg', 'weight_key' => 'my_custom_total'],
+        // ['pattern' => 'my_snapshot_*', 'strategy' => 'latest'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Redis Prefix
     |--------------------------------------------------------------------------
     | Prefix for temporary Redis keys used to aggregate metrics between
@@ -127,7 +153,7 @@ return [
     | Dashboard
     |--------------------------------------------------------------------------
     | Web dashboard with charts, summary cards, and slow log browser.
-    | Protected by Gate 'viewMonitoring' (IP-based by default).
+    | Protected by Gate 'viewMetrics' (IP-based by default).
     */
     'dashboard' => [
         'enabled' => env('MONITORING_DASHBOARD_ENABLED', true),
@@ -203,7 +229,7 @@ return [
     | Alerts (programmatic callback)
     |--------------------------------------------------------------------------
     | Optional alert thresholds checked on every collection run.
-    | Set callback via MonitoringService::onAlert().
+    | Set callback via MetricsService::onAlert().
     */
     'alerts' => [
         'queue_depth_high'       => env('MONITORING_ALERT_QUEUE_HIGH', 100),

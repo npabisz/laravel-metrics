@@ -4,16 +4,16 @@ namespace Npabisz\LaravelMetrics\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Npabisz\LaravelMetrics\Services\MonitoringService;
+use Npabisz\LaravelMetrics\Services\MetricsService;
 use Symfony\Component\HttpFoundation\Response;
 
 class RequestMonitor
 {
-    protected MonitoringService $monitoring;
+    protected MetricsService $metrics;
 
-    public function __construct(MonitoringService $monitoring)
+    public function __construct(MetricsService $metrics)
     {
-        $this->monitoring = $monitoring;
+        $this->monitoring = $metrics;
     }
 
     public function handle(Request $request, Closure $next): Response
@@ -68,7 +68,7 @@ class RequestMonitor
 
     protected function getThreshold(Request $request): int
     {
-        $thresholds = config('monitoring.slow_request_thresholds', ['*' => 2000]);
+        $thresholds = config('metrics.slow_request_thresholds', ['*' => 2000]);
         $path = $request->path();
 
         foreach ($thresholds as $pattern => $threshold) {

@@ -4,11 +4,11 @@ namespace Npabisz\LaravelMetrics\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class MonitoringMetric extends Model
+class Metric extends Model
 {
     public $timestamps = false;
 
-    protected $table = 'monitoring_metrics';
+    protected $table = 'metrics';
 
     protected $guarded = ['id'];
 
@@ -19,6 +19,6 @@ class MonitoringMetric extends Model
 
     public function getConnectionName()
     {
-        return config('monitoring.connection') ?? parent::getConnectionName();
+        return config('metrics.connection') ?? parent::getConnectionName();
     }
 }

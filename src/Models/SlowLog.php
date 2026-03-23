@@ -4,11 +4,11 @@ namespace Npabisz\LaravelMetrics\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class MonitoringSlowLog extends Model
+class SlowLog extends Model
 {
     public $timestamps = false;
 
-    protected $table = 'monitoring_slow_logs';
+    protected $table = 'metrics_slow_logs';
 
     protected $guarded = ['id'];
 
@@ -23,6 +23,6 @@ class MonitoringSlowLog extends Model
 
     public function getConnectionName()
     {
-        return config('monitoring.connection') ?? parent::getConnectionName();
+        return config('metrics.connection') ?? parent::getConnectionName();
     }
 }

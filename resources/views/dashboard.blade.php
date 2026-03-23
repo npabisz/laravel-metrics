@@ -132,6 +132,10 @@
                 <option value="60" selected>Last 1 hour</option>
                 <option value="360">Last 6 hours</option>
                 <option value="1440">Last 24 hours</option>
+                <option value="4320">Last 3 days</option>
+                <option value="10080">Last 7 days</option>
+                <option value="20160">Last 14 days</option>
+                <option value="43200">Last 30 days</option>
             </select>
             <select id="refreshSelect">
                 <option value="0">Auto-refresh: Off</option>
@@ -701,11 +705,14 @@
                 const valueColors = JSON.parse(container.dataset.valueColors || 'null');
                 const matchedKeys = Object.keys(custom).filter(k => patterns.some(p => matchesPattern(k, p)) && custom[k] !== null);
                 if (matchedKeys.length === 0) { container.innerHTML = ''; return; }
+                const period = lastData?.period || 60;
                 container.innerHTML = matchedKeys.map(key => {
                     const label = formatMetricLabel(key);
                     const formatted = formatMetricValue(key, custom[key]);
                     const color = resolveValueColor(key, custom[key], valueColors) || getMetricColor(key, custom[key]);
-                    return `<div class="card"><div class="card-title">${escHtml(label)}</div><div class="card-value ${color}">${formatted}</div></div>`;
+                    const isAvg = /_avg_/.test(key);
+                    const sub = isAvg ? `<div class="card-sub">avg over ${period >= 60 ? (period / 60) + 'h' : period + 'm'}</div>` : '';
+                    return `<div class="card"><div class="card-title">${escHtml(label)}</div><div class="card-value ${color}">${formatted}</div>${sub}</div>`;
                 }).join('');
             });
         }

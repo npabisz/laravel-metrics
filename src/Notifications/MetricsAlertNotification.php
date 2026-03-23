@@ -8,7 +8,7 @@ use Illuminate\Notifications\Notification;
 use Npabisz\LaravelMetrics\Notifications\Channels\DiscordChannel;
 use Npabisz\LaravelMetrics\Notifications\Channels\GoogleChatChannel;
 
-class MonitoringAlertNotification extends Notification
+class MetricsAlertNotification extends Notification
 {
     use Queueable;
 
@@ -31,7 +31,7 @@ class MonitoringAlertNotification extends Notification
 
     public function via($notifiable): array
     {
-        $channels = config('monitoring.notifications.channels', ['mail']);
+        $channels = config('metrics.notifications.channels', ['mail']);
 
         return array_map(function ($channel) {
             return static::$channelMap[$channel] ?? $channel;
@@ -193,17 +193,17 @@ class MonitoringAlertNotification extends Notification
 
     protected function shouldIncludeDashboardUrl(): bool
     {
-        return (bool) config('monitoring.notifications.include_dashboard_url', true);
+        return (bool) config('metrics.notifications.include_dashboard_url', true);
     }
 
     protected function getDashboardUrl(): string
     {
-        return url(config('monitoring.dashboard.path', 'monitoring'));
+        return url(config('metrics.dashboard.path', 'monitoring'));
     }
 
     protected function getAppName(): string
     {
-        if ($custom = config('monitoring.notifications.app_name')) {
+        if ($custom = config('metrics.notifications.app_name')) {
             return $custom;
         }
 

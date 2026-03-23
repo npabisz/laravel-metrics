@@ -3,10 +3,10 @@
 namespace Npabisz\LaravelMetrics\Commands;
 
 use Illuminate\Console\Command;
-use Npabisz\LaravelMetrics\Models\MonitoringMetric;
-use Npabisz\LaravelMetrics\Models\MonitoringSlowLog;
+use Npabisz\LaravelMetrics\Models\Metric;
+use Npabisz\LaravelMetrics\Models\SlowLog;
 
-class MonitoringStatusCommand extends Command
+class MetricsStatusCommand extends Command
 {
     protected $signature = 'monitoring:status {--minutes=5 : Show data from last N minutes}';
     protected $description = 'Show current monitoring status and recent metrics';
@@ -16,7 +16,7 @@ class MonitoringStatusCommand extends Command
         $minutes = (int) $this->option('minutes');
         $since = now()->subMinutes($minutes);
 
-        $metrics = MonitoringMetric::where('recorded_at', '>=', $since)
+        $metrics = Metric::where('recorded_at', '>=', $since)
             ->orderBy('recorded_at', 'desc')
             ->get();
 
@@ -94,7 +94,7 @@ class MonitoringStatusCommand extends Command
         );
 
         // Recent slow logs
-        $slowLogs = MonitoringSlowLog::where('recorded_at', '>=', $since)
+        $slowLogs = SlowLog::where('recorded_at', '>=', $since)
             ->orderBy('duration_ms', 'desc')
             ->limit(10)
             ->get();

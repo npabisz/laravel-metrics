@@ -5,17 +5,17 @@ namespace Npabisz\LaravelMetrics\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
-use Npabisz\LaravelMetrics\Models\MonitoringMetric;
-use Npabisz\LaravelMetrics\Models\MonitoringSlowLog;
+use Npabisz\LaravelMetrics\Models\Metric;
+use Npabisz\LaravelMetrics\Models\SlowLog;
 
-class MonitoringController extends Controller
+class MetricsController extends Controller
 {
     public function metrics(Request $request): JsonResponse
     {
         $minutes = (int) $request->input('minutes', 60);
         $minutes = min($minutes, 1440); // max 24h
 
-        $metrics = MonitoringMetric::where('recorded_at', '>=', now()->subMinutes($minutes))
+        $metrics = Metric::where('recorded_at', '>=', now()->subMinutes($minutes))
             ->orderBy('recorded_at', 'desc')
             ->get();
 
@@ -33,7 +33,7 @@ class MonitoringController extends Controller
         $type = $request->input('type'); // 'query' or 'request'
         $limit = min((int) $request->input('limit', 50), 200);
 
-        $query = MonitoringSlowLog::where('recorded_at', '>=', now()->subMinutes($minutes))
+        $query = SlowLog::where('recorded_at', '>=', now()->subMinutes($minutes))
             ->orderBy('duration_ms', 'desc')
             ->limit($limit);
 
@@ -53,18 +53,18 @@ class MonitoringController extends Controller
         $minutes = (int) $request->input('minutes', 5);
         $since = now()->subMinutes($minutes);
 
-        $metrics = MonitoringMetric::where('recorded_at', '>=', $since)->get();
+        $metrics = Metric::where('recorded_at', '>=', $since)->get();
         $latest = $metrics->sortByDesc('recorded_at')->first();
 
         if (!$latest) {
             return response()->json(['status' => 'no_data', 'message' => 'No metrics collected yet']);
         }
 
-        $slowQueries = MonitoringSlowLog::where('recorded_at', '>=', $since)
+        $slowQueries = SlowLog::where('recorded_at', '>=', $since)
             ->where('type', 'query')
             ->count();
 
-        $slowRequests = MonitoringSlowLog::where('recorded_at', '>=', $since)
+        $slowRequests = SlowLog::where('recorded_at', '>=', $since)
             ->where('type', 'request')
             ->count();
 

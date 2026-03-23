@@ -4,10 +4,10 @@ namespace Npabisz\LaravelMetrics\Services;
 
 use Illuminate\Support\Facades\Redis;
 use Npabisz\LaravelMetrics\Collectors\CollectorInterface;
-use Npabisz\LaravelMetrics\Models\MonitoringMetric;
-use Npabisz\LaravelMetrics\Models\MonitoringSlowLog;
+use Npabisz\LaravelMetrics\Models\Metric;
+use Npabisz\LaravelMetrics\Models\SlowLog;
 
-class MonitoringService
+class MetricsService
 {
     protected bool $enabled;
     protected ?string $redisConnection = null;
@@ -18,9 +18,9 @@ class MonitoringService
 
     public function __construct()
     {
-        $this->enabled = (bool) config('monitoring.enabled', true);
-        $this->redisConnection = config('monitoring.redis_connection', 'default');
-        $this->redisPrefix = config('monitoring.redis_prefix', 'monitoring:');
+        $this->enabled = (bool) config('metrics.enabled', true);
+        $this->redisConnection = config('metrics.redis_connection', 'default');
+        $this->redisPrefix = config('metrics.redis_prefix', 'monitoring:');
     }
 
     public function isEnabled(): bool
@@ -178,12 +178,12 @@ class MonitoringService
     /**
      * Run all configured collectors and store metrics.
      */
-    public function collectAndStore(): MonitoringMetric
+    public function collectAndStore(): Metric
     {
         $metrics = ['recorded_at' => now()];
         $custom = [];
 
-        $collectors = config('monitoring.collectors', []);
+        $collectors = config('metrics.collectors', []);
 
         foreach ($collectors as $collectorClass) {
             try {
@@ -207,7 +207,7 @@ class MonitoringService
             $metrics['custom'] = $custom;
         }
 
-        $record = MonitoringMetric::create($metrics);
+        $record = Metric::create($metrics);
 
         $this->checkAlerts($metrics);
 
@@ -227,9 +227,9 @@ class MonitoringService
         if (!$this->enabled) return;
 
         try {
-            MonitoringSlowLog::create([
+            SlowLog::create([
                 'recorded_at' => now(),
-                'type'        => MonitoringSlowLog::TYPE_QUERY,
+                'type'        => SlowLog::TYPE_QUERY,
                 'sql'         => mb_substr($sql, 0, 65535),
                 'bindings'    => $bindings,
                 'duration_ms' => round($durationMs, 2),
@@ -256,9 +256,9 @@ class MonitoringService
         if (!$this->enabled) return;
 
         try {
-            MonitoringSlowLog::create([
+            SlowLog::create([
                 'recorded_at' => now(),
-                'type'        => MonitoringSlowLog::TYPE_REQUEST,
+                'type'        => SlowLog::TYPE_REQUEST,
                 'method'      => $method,
                 'url'         => mb_substr($url, 0, 500),
                 'route'       => $route ? mb_substr($route, 0, 200) : null,
@@ -277,11 +277,11 @@ class MonitoringService
      */
     public function cleanup(): array
     {
-        $retentionMetrics = config('monitoring.retention.metrics', 30);
-        $retentionSlowLogs = config('monitoring.retention.slow_logs', 14);
+        $retentionMetrics = config('metrics.retention.metrics', 30);
+        $retentionSlowLogs = config('metrics.retention.slow_logs', 14);
 
-        $deletedMetrics = MonitoringMetric::where('recorded_at', '<', now()->subDays($retentionMetrics))->delete();
-        $deletedSlowLogs = MonitoringSlowLog::where('recorded_at', '<', now()->subDays($retentionSlowLogs))->delete();
+        $deletedMetrics = Metric::where('recorded_at', '<', now()->subDays($retentionMetrics))->delete();
+        $deletedSlowLogs = SlowLog::where('recorded_at', '<', now()->subDays($retentionSlowLogs))->delete();
 
         return [
             'metrics'   => $deletedMetrics,
@@ -298,7 +298,7 @@ class MonitoringService
             return;
         }
 
-        $alerts = config('monitoring.alerts', []);
+        $alerts = config('metrics.alerts', []);
         $mapping = [
             'queue_depth_high'      => 'queue_depth_high',
             'queue_depth_default'   => 'queue_depth_default',

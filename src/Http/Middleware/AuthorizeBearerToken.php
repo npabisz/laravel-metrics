@@ -10,7 +10,7 @@ class AuthorizeBearerToken
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $token = config('monitoring.routes.token');
+        $token = config('metrics.routes.token');
 
         if (empty($token)) {
             abort(403, 'Monitoring API token not configured.');

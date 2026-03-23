@@ -5,12 +5,12 @@ namespace Npabisz\LaravelMetrics\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
-use Npabisz\LaravelMetrics\Models\MonitoringMetric;
-use Npabisz\LaravelMetrics\Models\MonitoringSlowLog;
-use Npabisz\LaravelMetrics\Notifications\MonitoringAlertNotifiable;
-use Npabisz\LaravelMetrics\Notifications\MonitoringAlertNotification;
+use Npabisz\LaravelMetrics\Models\Metric;
+use Npabisz\LaravelMetrics\Models\SlowLog;
+use Npabisz\LaravelMetrics\Notifications\MetricsAlertNotifiable;
+use Npabisz\LaravelMetrics\Notifications\MetricsAlertNotification;
 
-class MonitoringAlertCommand extends Command
+class MetricsAlertCommand extends Command
 {
     protected $signature = 'monitoring:alert {--test : Send a test notification regardless of thresholds}';
     protected $description = 'Check monitoring metrics from last 15 minutes and send alert notification if thresholds are exceeded';
@@ -21,11 +21,11 @@ class MonitoringAlertCommand extends Command
             return $this->sendTestNotification();
         }
 
-        if (!config('monitoring.enabled', true)) {
+        if (!config('metrics.enabled', true)) {
             return self::SUCCESS;
         }
 
-        $notificationsConfig = config('monitoring.notifications', []);
+        $notificationsConfig = config('metrics.notifications', []);
 
         if (empty($notificationsConfig['enabled'])) {
             $this->info('Notifications are disabled.');
@@ -34,7 +34,7 @@ class MonitoringAlertCommand extends Command
 
         $interval = (int) ($notificationsConfig['interval'] ?? 1);
         $since = now()->subMinutes(max($interval, 1));
-        $metrics = MonitoringMetric::where('recorded_at', '>=', $since)->get();
+        $metrics = Metric::where('recorded_at', '>=', $since)->get();
 
         if ($metrics->isEmpty()) {
             $this->info('No metrics to evaluate.');
@@ -86,8 +86,8 @@ class MonitoringAlertCommand extends Command
 
         // Send notification
         try {
-            $notifiable = new MonitoringAlertNotifiable();
-            $notifiable->notify(new MonitoringAlertNotification($alerts, $summary));
+            $notifiable = new MetricsAlertNotifiable();
+            $notifiable->notify(new MetricsAlertNotification($alerts, $summary));
             $this->info('Alert notification sent.');
 
             // Set cooldown for each fired alert
@@ -108,7 +108,7 @@ class MonitoringAlertCommand extends Command
     protected function evaluateAlerts(array $summary, $metrics): array
     {
         $alerts = [];
-        $thresholds = config('monitoring.notifications.thresholds', []);
+        $thresholds = config('metrics.notifications.thresholds', []);
 
         // 5xx error rate
         $errorRateThreshold = $thresholds['error_rate_5xx'] ?? 0.05;
@@ -330,7 +330,7 @@ class MonitoringAlertCommand extends Command
 
     protected function sendTestNotification(): int
     {
-        $channels = config('monitoring.notifications.channels', ['mail']);
+        $channels = config('metrics.notifications.channels', ['mail']);
         $this->info('Sending test notification to: ' . implode(', ', $channels));
 
         $alerts = [
@@ -375,8 +375,8 @@ class MonitoringAlertCommand extends Command
         ];
 
         try {
-            $notifiable = new MonitoringAlertNotifiable();
-            $notifiable->notify(new MonitoringAlertNotification($alerts, $summary));
+            $notifiable = new MetricsAlertNotifiable();
+            $notifiable->notify(new MetricsAlertNotification($alerts, $summary));
             $this->info('Test notification sent successfully.');
         } catch (\Throwable $e) {
             $this->error('Failed to send test notification: ' . $e->getMessage());

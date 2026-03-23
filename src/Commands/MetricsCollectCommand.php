@@ -3,16 +3,16 @@
 namespace Npabisz\LaravelMetrics\Commands;
 
 use Illuminate\Console\Command;
-use Npabisz\LaravelMetrics\Services\MonitoringService;
+use Npabisz\LaravelMetrics\Services\MetricsService;
 
-class MonitoringCollectCommand extends Command
+class MetricsCollectCommand extends Command
 {
     protected $signature = 'monitoring:collect';
     protected $description = 'Collect monitoring metrics and store in database';
 
-    public function handle(MonitoringService $service): int
+    public function handle(MetricsService $service): int
     {
-        if (!config('monitoring.enabled', true)) {
+        if (!config('metrics.enabled', true)) {
             $this->info('Monitoring is disabled.');
             return self::SUCCESS;
         }

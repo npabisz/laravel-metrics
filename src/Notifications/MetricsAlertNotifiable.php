@@ -8,13 +8,13 @@ use Illuminate\Notifications\Notifiable;
  * Anonymous notifiable for sending monitoring alerts
  * without requiring a User model.
  */
-class MonitoringAlertNotifiable
+class MetricsAlertNotifiable
 {
     use Notifiable;
 
     public function routeNotificationForMail(): array|string
     {
-        $recipients = config('monitoring.notifications.mail.to', []);
+        $recipients = config('metrics.notifications.mail.to', []);
 
         if (is_string($recipients)) {
             return array_map('trim', explode(',', $recipients));
@@ -25,16 +25,16 @@ class MonitoringAlertNotifiable
 
     public function routeNotificationForSlack(): ?string
     {
-        return config('monitoring.notifications.slack.webhook_url');
+        return config('metrics.notifications.slack.webhook_url');
     }
 
     public function routeNotificationForDiscord(): ?string
     {
-        return config('monitoring.notifications.discord.webhook_url');
+        return config('metrics.notifications.discord.webhook_url');
     }
 
     public function routeNotificationForGoogleChat(): ?string
     {
-        return config('monitoring.notifications.google_chat.webhook_url');
+        return config('metrics.notifications.google_chat.webhook_url');
     }
 }

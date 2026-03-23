@@ -8,12 +8,12 @@ return new class extends Migration
 {
     public function getConnection()
     {
-        return config('monitoring.connection');
+        return config('metrics.connection');
     }
 
     public function up()
     {
-        Schema::connection($this->getConnection())->create('monitoring_metrics', function (Blueprint $table) {
+        Schema::connection($this->getConnection())->create('metrics', function (Blueprint $table) {
             $table->id();
             $table->timestamp('recorded_at');
 
@@ -53,10 +53,10 @@ return new class extends Migration
             // Custom metrics (extensible JSON)
             $table->json('custom')->nullable();
 
-            $table->index('recorded_at', 'idx_monitoring_recorded_at');
+            $table->index('recorded_at', 'idx_metrics_recorded_at');
         });
 
-        Schema::connection($this->getConnection())->create('monitoring_slow_logs', function (Blueprint $table) {
+        Schema::connection($this->getConnection())->create('metrics_slow_logs', function (Blueprint $table) {
             $table->id();
             $table->timestamp('recorded_at');
 
@@ -88,7 +88,7 @@ return new class extends Migration
     public function down()
     {
         $connection = $this->getConnection();
-        Schema::connection($connection)->dropIfExists('monitoring_slow_logs');
-        Schema::connection($connection)->dropIfExists('monitoring_metrics');
+        Schema::connection($connection)->dropIfExists('metrics_slow_logs');
+        Schema::connection($connection)->dropIfExists('metrics');
     }
 };

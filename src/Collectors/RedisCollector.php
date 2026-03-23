@@ -9,7 +9,7 @@ class RedisCollector implements CollectorInterface
     public function collect(): array
     {
         try {
-            $connection = config('monitoring.redis_connection', 'default');
+            $connection = config('metrics.redis_connection', 'default');
             $info = Redis::connection($connection)->info();
 
             // Handle different Redis client response formats

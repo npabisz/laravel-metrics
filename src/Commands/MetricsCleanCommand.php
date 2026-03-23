@@ -3,14 +3,14 @@
 namespace Npabisz\LaravelMetrics\Commands;
 
 use Illuminate\Console\Command;
-use Npabisz\LaravelMetrics\Services\MonitoringService;
+use Npabisz\LaravelMetrics\Services\MetricsService;
 
-class MonitoringCleanCommand extends Command
+class MetricsCleanCommand extends Command
 {
     protected $signature = 'monitoring:clean';
     protected $description = 'Clean up old monitoring data based on retention settings';
 
-    public function handle(MonitoringService $service): int
+    public function handle(MetricsService $service): int
     {
         $deleted = $service->cleanup();
 

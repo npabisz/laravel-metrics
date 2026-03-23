@@ -5,17 +5,17 @@ namespace Npabisz\LaravelMetrics\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
-use Npabisz\LaravelMetrics\Models\MonitoringMetric;
-use Npabisz\LaravelMetrics\Models\MonitoringSlowLog;
+use Npabisz\LaravelMetrics\Models\Metric;
+use Npabisz\LaravelMetrics\Models\MetricHourly;
+use Npabisz\LaravelMetrics\Models\SlowLog;
+use Npabisz\LaravelMetrics\Services\MetricAggregator;
 
 class DashboardController extends Controller
 {
     public function index()
     {
-        $views = config('monitoring.dashboard.views', []);
+        $views = config('metrics.dashboard.views', []);
 
-        // Collect all chart/card sections from views that have gauge/format config
-        // so the frontend can use them for aggregation and formatting
         $metricConfigs = [];
         foreach ($views as $view) {
             foreach ($view['sections'] ?? [] as $section) {
@@ -32,7 +32,7 @@ class DashboardController extends Controller
             }
         }
 
-        return view('monitoring::dashboard', [
+        return view('metrics::dashboard', [
             'views'        => $views,
             'metricConfigs' => $metricConfigs,
         ]);
@@ -41,20 +41,35 @@ class DashboardController extends Controller
     public function apiData(Request $request): JsonResponse
     {
         $minutes = (int) $request->input('minutes', 60);
-        $minutes = min($minutes, 1440);
+        $minutes = min($minutes, 43200); // max 30 days
         $since = now()->subMinutes($minutes);
 
-        $metrics = MonitoringMetric::where('recorded_at', '>=', $since)
+        // Pick resolution: raw (<2h), 5-min grouped (2-48h), hourly (>48h)
+        if ($minutes > 2880) {
+            return $this->apiDataHourly($minutes, $since);
+        }
+
+        $metrics = Metric::where('recorded_at', '>=', $since)
             ->orderBy('recorded_at', 'asc')
             ->get();
 
-        $latest = $metrics->last();
-
-        if (!$latest) {
+        if ($metrics->isEmpty()) {
             return response()->json(['status' => 'no_data']);
         }
 
-        // Aggregate for summary cards
+        if ($minutes > 120) {
+            return $this->apiDataGrouped($metrics, $minutes, 5);
+        }
+
+        return $this->buildResponse($metrics, $minutes, 'H:i');
+    }
+
+    /**
+     * Raw or grouped response from metrics.
+     */
+    protected function buildResponse($metrics, int $minutes, string $timeFormat, bool $isGrouped = false): JsonResponse
+    {
+        $latest = $metrics->last();
         $totalRequests = $metrics->sum('http_requests_total');
         $total5xx = $metrics->sum('http_requests_5xx');
 
@@ -89,9 +104,9 @@ class DashboardController extends Controller
                 'disk_free_gb'        => $latest->disk_free_gb,
                 'custom'              => $this->aggregateCustomMetrics($metrics),
             ],
-            'timeline' => $metrics->map(function ($m) {
+            'timeline' => $metrics->map(function ($m) use ($timeFormat) {
                 $row = [
-                    'time'             => $m->recorded_at->format('H:i'),
+                    'time'             => $m->recorded_at->format($timeFormat),
                     'requests'         => $m->http_requests_total,
                     'avg_duration'     => round($m->http_avg_duration_ms, 1),
                     'max_duration'     => round($m->http_max_duration_ms, 1),
@@ -106,7 +121,6 @@ class DashboardController extends Controller
                     'redis_ops'        => $m->redis_ops_per_sec,
                 ];
 
-                // Include numeric custom metrics in timeline
                 if (is_array($m->custom)) {
                     foreach ($m->custom as $key => $value) {
                         if (is_numeric($value)) {
@@ -121,87 +135,94 @@ class DashboardController extends Controller
     }
 
     /**
-     * Aggregate custom metrics across all samples.
-     * Keys matching gauge patterns use latest value.
-     * Everything else is summed.
+     * Group 1-min samples into N-min buckets for mid-range periods.
      */
+    protected function apiDataGrouped($metrics, int $minutes, int $bucketMinutes): JsonResponse
+    {
+        $aggregator = app(MetricAggregator::class);
+
+        $grouped = $metrics->groupBy(function ($m) use ($bucketMinutes) {
+            $ts = $m->recorded_at;
+            $bucket = $ts->copy()->minute(intdiv($ts->minute, $bucketMinutes) * $bucketMinutes)->second(0);
+
+            return $bucket->format('Y-m-d H:i');
+        });
+
+        $timeFormat = $minutes > 1440 ? 'M d H:i' : 'H:i';
+
+        $buckets = $grouped->map(function ($samples, $bucketKey) use ($aggregator, $timeFormat) {
+            $latest = $samples->last();
+            $customAll = $samples->pluck('custom')->filter()->values();
+            $custom = $customAll->isNotEmpty() ? $aggregator->aggregateCustom($customAll) : [];
+
+            $obj = new \stdClass();
+            $obj->recorded_at = $samples->first()->recorded_at;
+            $obj->http_requests_total = $samples->sum('http_requests_total');
+            $obj->http_requests_2xx = $samples->sum('http_requests_2xx');
+            $obj->http_requests_4xx = $samples->sum('http_requests_4xx');
+            $obj->http_requests_5xx = $samples->sum('http_requests_5xx');
+            $obj->http_avg_duration_ms = round($samples->avg('http_avg_duration_ms'), 1);
+            $obj->http_max_duration_ms = round($samples->max('http_max_duration_ms'), 1);
+            $obj->http_slow_requests = $samples->sum('http_slow_requests');
+            $obj->queue_depth_high = $latest->queue_depth_high;
+            $obj->queue_depth_default = $latest->queue_depth_default;
+            $obj->queue_depth_low = $latest->queue_depth_low;
+            $obj->queue_jobs_processed = $samples->sum('queue_jobs_processed');
+            $obj->queue_jobs_failed = $samples->sum('queue_jobs_failed');
+            $obj->db_queries_total = $samples->sum('db_queries_total');
+            $obj->db_slow_queries = $samples->sum('db_slow_queries');
+            $obj->db_avg_query_ms = round($samples->avg('db_avg_query_ms'), 1);
+            $obj->db_max_query_ms = round($samples->max('db_max_query_ms'), 1);
+            $obj->redis_memory_used_mb = $latest->redis_memory_used_mb;
+            $obj->redis_connected_clients = $latest->redis_connected_clients;
+            $obj->redis_ops_per_sec = $latest->redis_ops_per_sec;
+            $obj->redis_cache_hit_rate = $latest->redis_cache_hit_rate;
+            $obj->cpu_load_1m = $latest->cpu_load_1m;
+            $obj->memory_usage_mb = $latest->memory_usage_mb;
+            $obj->disk_free_gb = $latest->disk_free_gb;
+            $obj->custom = $custom;
+
+            return $obj;
+        })->values();
+
+        return $this->buildResponse($buckets, $minutes, $timeFormat);
+    }
+
+    /**
+     * Use hourly rollup table for ranges >48h.
+     */
+    protected function apiDataHourly(int $minutes, $since): JsonResponse
+    {
+        $metrics = MetricHourly::where('recorded_at', '>=', $since)
+            ->orderBy('recorded_at', 'asc')
+            ->get();
+
+        if ($metrics->isEmpty()) {
+            return response()->json(['status' => 'no_data']);
+        }
+
+        $timeFormat = $minutes > 1440 ? 'M d H:i' : 'H:i';
+
+        return $this->buildResponse($metrics, $minutes, $timeFormat);
+    }
+
     protected function aggregateCustomMetrics($metrics): array
     {
-        $all = $metrics->pluck('custom')->filter()->values();
+        $all = collect($metrics)->pluck('custom')->filter()->values();
 
-        if ($all->isEmpty()) {
-            return [];
-        }
-
-        $allKeys = $all->flatMap(fn ($c) => array_keys($c))->unique()->values();
-        $latest = $all->last();
-        $result = [];
-
-        $gaugeKeys = $this->getGaugeKeys();
-        $gaugePattern = $this->buildGaugePattern();
-
-        foreach ($allKeys as $key) {
-            $latestValue = $latest[$key] ?? null;
-
-            // Skip non-numeric values (e.g. domain names stored as strings)
-            if ($latestValue !== null && !is_numeric($latestValue)) {
-                $result[$key] = $latestValue;
-                continue;
-            }
-
-            if (isset($gaugeKeys[$key]) || preg_match($gaugePattern, $key)) {
-                $result[$key] = $latestValue;
-            } else {
-                $result[$key] = $all->sum(fn ($c) => is_numeric($c[$key] ?? null) ? $c[$key] : 0);
-            }
-        }
-
-        return $result;
-    }
-
-    protected function getGaugeKeys(): array
-    {
-        $keys = [];
-
-        // Collect from views config
-        $views = config('monitoring.dashboard.views', []);
-        foreach ($views as $view) {
-            foreach ($view['sections'] ?? [] as $section) {
-                if (!empty($section['gauge'])) {
-                    foreach ($section['keys'] ?? [] as $pattern) {
-                        $keys[$pattern] = true;
-                    }
-                }
-            }
-        }
-
-        return $keys;
-    }
-
-    protected function buildGaugePattern(): string
-    {
-        $builtIn = [
-            '_avg_', 'avg_ms', '_max_', 'max_ms', 'p95_', 'p99_', 'hit_rate',
-            '_status', '_load', '_count', '_size_mb', '_total_mb', '_free_gb',
-            '_memory_mb', '_limit_mb', '_clients', '_ops_per_sec', 'active_',
-            '_percent', '_mbps', '_domain',
-        ];
-
-        $escaped = array_map(fn ($p) => preg_quote($p, '/'), $builtIn);
-
-        return '/(' . implode('|', $escaped) . ')/';
+        return app(MetricAggregator::class)->aggregateCustom($all);
     }
 
     public function apiSlowLogs(Request $request): JsonResponse
     {
         $minutes = (int) $request->input('minutes', 60);
-        $minutes = min($minutes, 1440);
+        $minutes = min($minutes, 43200);
         $type = $request->input('type');
         $perPage = min((int) $request->input('per_page', 25), 100);
         $page = max((int) $request->input('page', 1), 1);
         $sort = $request->input('sort', 'duration');
 
-        $query = MonitoringSlowLog::where('recorded_at', '>=', now()->subMinutes($minutes));
+        $query = SlowLog::where('recorded_at', '>=', now()->subMinutes($minutes));
 
         if ($type) {
             $query->where('type', $type);
