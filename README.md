@@ -108,7 +108,9 @@ Available at `/{path}` (default: `/monitoring`). Protected by the `viewMonitorin
 **Features:**
 - Summary cards — HTTP requests, response times, error rate, queue depth, DB queries, Redis stats, CPU, disk
 - Timeline charts — requests/min, response time (avg+max), queue depth, DB queries/min
-- Slow logs browser — filterable table (all / requests / queries), sorted by duration
+- Custom metric cards and charts — display any data from your custom collectors
+- Tabbed views — organize metrics into multiple pages for readability
+- Slow logs browser — filterable table (all / requests / queries), sorted by duration or time, paginated
 - Auto-refresh — configurable interval (10s / 30s / 60s)
 - Period selector — 5min / 15min / 30min / 1h / 6h / 24h
 
@@ -127,6 +129,64 @@ Gate::define('viewMonitoring', function ($user = null) {
     // your custom logic
 });
 ```
+
+### Dashboard Views
+
+When your application has many custom metrics, you can organize the dashboard into multiple tabbed pages using the `views` config. Each view has a label and an array of sections.
+
+When `views` is empty (default), the dashboard shows a single page with all built-in panels, custom metric cards, and slow logs.
+
+```php
+// config/monitoring.php → dashboard.views
+'views' => [
+    [
+        'label' => 'Overview',
+        'sections' => [
+            ['type' => 'built-in'],
+            ['type' => 'cards', 'label' => 'Business', 'keys' => ['active_users', 'orders_total', 'revenue_usd']],
+            ['type' => 'slow-logs'],
+        ],
+    ],
+    [
+        'label' => 'External APIs',
+        'sections' => [
+            ['type' => 'cards', 'label' => 'Payment Gateway', 'keys' => ['payment_api_*']],
+            ['type' => 'chart', 'label' => 'Payment Calls', 'keys' => ['payment_api_calls', 'payment_api_errors'], 'colors' => ['blue', 'red']],
+            ['type' => 'cards', 'label' => 'Email Service', 'keys' => ['email_api_*']],
+            ['type' => 'chart', 'label' => 'Email Delivery', 'keys' => ['email_api_calls', 'email_api_errors', 'email_api_bounces']],
+        ],
+    ],
+    [
+        'label' => 'Infrastructure',
+        'sections' => [
+            ['type' => 'cards', 'label' => 'Resources', 'keys' => ['cpu_usage_*', 'memory_*', 'net_*']],
+            ['type' => 'chart', 'label' => 'CPU & Memory', 'keys' => ['cpu_usage_percent', 'memory_usage_percent'], 'chart_type' => 'line', 'gauge' => true, 'format' => ['suffix' => '%']],
+        ],
+    ],
+],
+```
+
+#### Section Types
+
+| Type | Description |
+|------|-------------|
+| `built-in` | Built-in card group. Set `'id'` to show only one: `'http'`, `'queue'`, `'database'`, `'system'`. Omit `id` for all four + timeline charts. |
+| `cards` | Summary cards for custom metric keys matching `'keys'` patterns. |
+| `chart` | A chart panel for custom metric keys matching `'keys'` patterns. |
+| `slow-logs` | The slow logs table with type filters, sort buttons, and pagination. |
+
+#### Chart/Card Options
+
+| Option | Description |
+|--------|-------------|
+| `label` | Section title displayed above cards or as chart title. |
+| `keys` | Array of metric key names. Supports `*` wildcard (e.g. `payment_api_*`). |
+| `colors` | Indexed array `['blue', 'red']` or keyed map `['errors' => 'red', 'calls' => 'blue']`. Available: blue, red, green, yellow, purple, cyan, orange, pink. |
+| `chart_type` | `'bar'` (default) or `'line'`. |
+| `gauge` | `true` to use latest value instead of sum for aggregation. Use for metrics like CPU %, memory, averages. |
+| `format` | `['suffix' => '%', 'decimals' => 1, 'multiply' => 1]` — custom value formatting. |
+
+The same metric key can appear in multiple views. Tabs persist across page refreshes (via localStorage) and are linkable via URL hash (e.g. `#infrastructure`).
 
 ## JSON API
 

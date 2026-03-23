@@ -135,45 +135,56 @@ return [
 
         /*
         |----------------------------------------------------------------------
-        | Custom Metrics
+        | Views (Tabbed Dashboard Pages)
         |----------------------------------------------------------------------
-        | Define how custom metrics are displayed in the dashboard.
-        | Each entry creates one chart panel and controls how matched
-        | metrics are aggregated and formatted in summary cards.
+        | Organize the dashboard into multiple tabs/pages. Each view has a
+        | label and an array of sections that control what is displayed.
         |
-        | When empty (default), metrics are auto-grouped by shared prefix.
+        | When empty (default), the dashboard shows a single page with all
+        | built-in panels, slow logs, and all custom metrics as cards.
         |
-        | Options:
-        |   'label'  — chart title (required)
-        |   'keys'   — metric keys to include, supports '*' wildcard (required)
-        |   'colors' — optional, indexed array or keyed map
-        |              Available: blue, red, green, yellow, purple, cyan, orange, pink
-        |   'type'   — 'bar' (default) or 'line'
-        |   'gauge'  — true to use latest value instead of sum in summary cards
-        |   'format' — ['suffix' => '%', 'decimals' => 1, 'multiply' => 1]
+        | Section types:
+        |   'built-in'  — renders built-in card group: 'http', 'queue',
+        |                  'database', 'system' (all four if 'id' omitted)
+        |   'cards'     — summary cards for matching custom metric keys
+        |   'chart'     — a chart panel for matching custom metric keys
+        |   'slow-logs' — the slow logs table with filters and pagination
+        |
+        | Chart/card options:
+        |   'label'      — section title
+        |   'keys'       — metric keys to include, supports '*' wildcard
+        |   'colors'     — indexed array or keyed map (blue, red, green,
+        |                   yellow, purple, cyan, orange, pink)
+        |   'chart_type' — 'bar' (default) or 'line'
+        |   'gauge'      — true to use latest value instead of sum
+        |   'format'     — ['suffix' => '%', 'decimals' => 1, 'multiply' => 1]
         |
         | Example:
         |   [
-        |       'label'  => 'Checkout',
-        |       'keys'   => ['checkout_requests', 'checkout_errors'],
-        |       'colors' => ['checkout_errors' => 'red', 'checkout_*' => 'blue'],
+        |       'label' => 'Overview',
+        |       'sections' => [
+        |           ['type' => 'built-in'],
+        |           ['type' => 'cards', 'label' => 'Key Metrics', 'keys' => ['active_users', 'orders_total']],
+        |           ['type' => 'slow-logs'],
+        |       ],
         |   ],
         |   [
-        |       'label'  => 'CPU & Memory',
-        |       'keys'   => ['cpu_usage_percent', 'memory_usage_percent'],
-        |       'type'   => 'line',
-        |       'gauge'  => true,
-        |       'format' => ['suffix' => '%'],
+        |       'label' => 'External APIs',
+        |       'sections' => [
+        |           ['type' => 'cards', 'label' => 'Payment Gateway', 'keys' => ['payment_api_*']],
+        |           ['type' => 'chart', 'label' => 'API Calls', 'keys' => ['payment_api_calls', 'payment_api_errors'], 'colors' => ['blue', 'red']],
+        |       ],
         |   ],
         |   [
-        |       'label'  => 'Network Throughput',
-        |       'keys'   => ['net_rx_mbps', 'net_tx_mbps'],
-        |       'type'   => 'line',
-        |       'gauge'  => true,
-        |       'format' => ['suffix' => ' Mbps', 'decimals' => 2],
+        |       'label' => 'Infrastructure',
+        |       'sections' => [
+        |           ['type' => 'cards', 'label' => 'Resources', 'keys' => ['cpu_usage_*', 'memory_*']],
+        |           ['type' => 'chart', 'label' => 'CPU Usage', 'keys' => ['cpu_usage_percent'], 'chart_type' => 'line', 'gauge' => true, 'format' => ['suffix' => '%']],
+        |       ],
         |   ],
         */
-        'custom_metrics' => [],
+        'views' => [],
+
     ],
 
     /*

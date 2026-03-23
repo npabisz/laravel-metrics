@@ -12,10 +12,29 @@ class DashboardController extends Controller
 {
     public function index()
     {
-        $customMetrics = config('monitoring.dashboard.custom_metrics', []);
+        $views = config('monitoring.dashboard.views', []);
+
+        // Collect all chart/card sections from views that have gauge/format config
+        // so the frontend can use them for aggregation and formatting
+        $metricConfigs = [];
+        foreach ($views as $view) {
+            foreach ($view['sections'] ?? [] as $section) {
+                if (!empty($section['keys'])) {
+                    $metricConfigs[] = [
+                        'label'  => $section['label'] ?? '',
+                        'keys'   => $section['keys'],
+                        'colors' => $section['colors'] ?? null,
+                        'type'   => $section['chart_type'] ?? null,
+                        'gauge'  => $section['gauge'] ?? false,
+                        'format' => $section['format'] ?? null,
+                    ];
+                }
+            }
+        }
 
         return view('monitoring::dashboard', [
-            'customCharts' => $customMetrics,
+            'views'        => $views,
+            'metricConfigs' => $metricConfigs,
         ]);
     }
 
@@ -134,16 +153,17 @@ class DashboardController extends Controller
 
     protected function getGaugeKeys(): array
     {
-        $customMetrics = config('monitoring.dashboard.custom_metrics', []);
         $keys = [];
 
-        foreach ($customMetrics as $group) {
-            if (empty($group['gauge'])) {
-                continue;
-            }
-
-            foreach ($group['keys'] ?? [] as $pattern) {
-                $keys[$pattern] = true;
+        // Collect from views config
+        $views = config('monitoring.dashboard.views', []);
+        foreach ($views as $view) {
+            foreach ($view['sections'] ?? [] as $section) {
+                if (!empty($section['gauge'])) {
+                    foreach ($section['keys'] ?? [] as $pattern) {
+                        $keys[$pattern] = true;
+                    }
+                }
             }
         }
 

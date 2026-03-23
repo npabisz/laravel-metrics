@@ -38,7 +38,16 @@
         .status-dot.warn { background: var(--yellow); box-shadow: 0 0 6px var(--yellow); }
         .status-dot.error { background: var(--red); box-shadow: 0 0 6px var(--red); }
         .status-dot.off { background: var(--text-muted); }
+
+        /* View tabs */
+        .view-tabs { background: var(--card); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; gap: 0; overflow-x: auto; }
+        .view-tab { padding: 10px 20px; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; white-space: nowrap; user-select: none; }
+        .view-tab:hover { color: var(--text); background: rgba(255,255,255,0.02); }
+        .view-tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+
         .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        .view-page { display: none; }
+        .view-page.active { display: block; }
         .grid { display: grid; gap: 16px; }
         .grid-4 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
         .grid-2 { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
@@ -53,6 +62,7 @@
         .card-value.purple { color: var(--purple); }
         .card-value.cyan { color: var(--cyan); }
         .section-title { font-size: 14px; font-weight: 600; color: var(--text-muted); margin: 24px 0 12px; text-transform: uppercase; letter-spacing: 1px; }
+        .section-title:first-child { margin-top: 0; }
         .chart-container { position: relative; height: 220px; }
         .table-wrapper { overflow-x: auto; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -85,6 +95,8 @@
         @media (max-width: 768px) {
             .grid-4 { grid-template-columns: repeat(2, 1fr); }
             .grid-2 { grid-template-columns: 1fr; }
+            .view-tabs { padding: 0 12px; }
+            .view-tab { padding: 8px 14px; font-size: 12px; }
         }
     </style>
 </head>
@@ -114,70 +126,9 @@
         </div>
     </div>
 
-    <div class="container">
-        <!-- Summary Cards -->
-        <div class="grid grid-4" id="summaryCards">
-            <div class="card"><div class="card-title">HTTP Requests</div><div class="card-value" id="httpTotal">--</div><div class="card-sub" id="httpSub">--</div></div>
-            <div class="card"><div class="card-title">Avg Response</div><div class="card-value" id="httpAvg">--</div><div class="card-sub" id="httpAvgSub">--</div></div>
-            <div class="card"><div class="card-title">Error Rate</div><div class="card-value" id="errorRate">--</div><div class="card-sub" id="errorSub">--</div></div>
-            <div class="card"><div class="card-title">Slow Requests</div><div class="card-value" id="slowReq">--</div><div class="card-sub">above threshold</div></div>
-            <div class="card"><div class="card-title">Queue Depth</div><div class="card-value" id="queueDepth">--</div><div class="card-sub" id="queueSub">--</div></div>
-            <div class="card"><div class="card-title">Jobs Processed</div><div class="card-value" id="jobsProcessed">--</div><div class="card-sub" id="jobsSub">--</div></div>
-            <div class="card"><div class="card-title">DB Queries</div><div class="card-value" id="dbQueries">--</div><div class="card-sub" id="dbSub">--</div></div>
-            <div class="card"><div class="card-title">Slow Queries</div><div class="card-value" id="dbSlow">--</div><div class="card-sub" id="dbSlowSub">--</div></div>
-        </div>
+    <div id="viewTabs" class="view-tabs" style="display:none"></div>
 
-        <!-- System Cards -->
-        <div class="section-title">System & Redis</div>
-        <div class="grid grid-4">
-            <div class="card"><div class="card-title">CPU Load (1m)</div><div class="card-value" id="cpuLoad">--</div></div>
-            <div class="card"><div class="card-title">Redis Memory</div><div class="card-value" id="redisMem">--</div><div class="card-sub" id="redisMemSub">--</div></div>
-            <div class="card"><div class="card-title">Redis Ops/sec</div><div class="card-value" id="redisOps">--</div><div class="card-sub" id="redisHitRate">--</div></div>
-            <div class="card"><div class="card-title">Disk Free</div><div class="card-value" id="diskFree">--</div></div>
-        </div>
-
-        <!-- Custom Metrics Cards -->
-        <div class="section-title" id="customTitle" style="display:none">Custom Metrics</div>
-        <div class="grid grid-4" id="customCards"></div>
-
-        <!-- Built-in Charts -->
-        <div class="section-title">Timeline</div>
-        <div class="grid grid-2">
-            <div class="card"><div class="card-title">Requests / minute</div><div class="chart-container"><canvas id="chartRequests"></canvas></div></div>
-            <div class="card"><div class="card-title">Response time (ms)</div><div class="chart-container"><canvas id="chartDuration"></canvas></div></div>
-            <div class="card"><div class="card-title">Queue depth</div><div class="chart-container"><canvas id="chartQueue"></canvas></div></div>
-            <div class="card"><div class="card-title">DB queries / minute</div><div class="chart-container"><canvas id="chartDb"></canvas></div></div>
-        </div>
-
-        <!-- Custom Charts -->
-        <div class="section-title" id="customChartsTitle" style="display:none">Custom Timeline</div>
-        <div class="grid grid-2" id="customChartsGrid"></div>
-
-        <!-- Slow Logs -->
-        <div class="section-title">Slow Logs</div>
-        <div class="card">
-            <div class="slow-controls">
-                <div class="tabs" style="margin-bottom:0; border-bottom:none;">
-                    <div class="tab active" data-type="">All</div>
-                    <div class="tab" data-type="request">Requests</div>
-                    <div class="tab" data-type="query">Queries</div>
-                </div>
-                <div class="sort-controls">
-                    <span style="font-size:11px;color:var(--text-muted);margin-right:4px;">Sort:</span>
-                    <button class="sort-btn active" data-sort="duration">Slowest</button>
-                    <button class="sort-btn" data-sort="time">Recent</button>
-                </div>
-            </div>
-            <div style="border-bottom:1px solid var(--border); margin-bottom:16px;"></div>
-            <div class="table-wrapper">
-                <table>
-                    <thead><tr><th>Type</th><th>Duration</th><th>Detail</th><th>Status</th><th>User</th><th>Time</th></tr></thead>
-                    <tbody id="slowLogsBody"><tr><td colspan="6" class="no-data">Loading...</td></tr></tbody>
-                </table>
-            </div>
-            <div class="pagination" id="slowLogsPagination"></div>
-        </div>
-    </div>
+    <div class="container" id="dashboardContainer"></div>
 
     <script>
         // ─── Chart.js defaults ──────────────────────────────────
@@ -200,6 +151,8 @@
             pink:   { bg: 'rgba(236,72,153,0.15)',  border: '#ec4899' },
         };
         const COLOR_LIST = Object.values(COLORS);
+        const SAFE_COLORS = [COLORS.blue, COLORS.green, COLORS.yellow, COLORS.purple, COLORS.cyan, COLORS.orange, COLORS.pink];
+        const ERROR_PATTERN = /error|5xx|fail|slow|max|high|timeout/i;
 
         const chartOpts = (yLabel = '') => ({
             responsive: true,
@@ -237,34 +190,215 @@
             return opts;
         };
 
-        // ─── State ──────────────────────────────────────────────
+        // ─── Config & State ───────────────────────────────────
         const basePath = '{{ rtrim(config("monitoring.dashboard.path", "monitoring"), "/") }}';
-        const customChartConfig = @json($customCharts ?? []);
+        const viewsConfig = @json($views ?? []);
+        const metricConfigs = @json($metricConfigs ?? []);
         let refreshTimer = null;
         let currentSlowType = '';
         let currentSlowSort = 'duration';
         let currentSlowPage = 1;
+        let activeViewIndex = 0;
         const charts = {};
+        let lastData = null;
+
+        // ─── Default view (when no views configured) ──────────
+        // Single page with all built-in panels, custom metric cards, and slow logs
+        const defaultViews = [{
+            label: 'Dashboard',
+            sections: [
+                { type: 'built-in' },
+                { type: 'all-custom-cards' },
+                { type: 'slow-logs' },
+            ],
+        }];
+
+        const activeViews = viewsConfig.length > 0 ? viewsConfig : defaultViews;
+
+        // ─── View system ──────────────────────────────────────
+        function initDashboard() {
+            // Show tab bar only when multiple views are configured
+            if (activeViews.length > 1) {
+                const tabBar = document.getElementById('viewTabs');
+                tabBar.style.display = 'flex';
+                tabBar.innerHTML = activeViews.map((v, i) =>
+                    `<div class="view-tab${i === 0 ? ' active' : ''}" data-view="${i}">${escHtml(v.label || 'View ' + (i + 1))}</div>`
+                ).join('');
+
+                tabBar.querySelectorAll('.view-tab').forEach(tab => {
+                    tab.addEventListener('click', () => switchView(parseInt(tab.dataset.view)));
+                });
+            }
+
+            const container = document.getElementById('dashboardContainer');
+            container.innerHTML = activeViews.map((view, vi) =>
+                `<div class="view-page${vi === 0 ? ' active' : ''}" data-view-page="${vi}">${buildViewSections(view, vi)}</div>`
+            ).join('');
+
+            // Restore active tab from hash or localStorage
+            if (activeViews.length > 1) {
+                const hash = window.location.hash.slice(1);
+                if (hash) {
+                    const idx = activeViews.findIndex(v => slugify(v.label) === hash);
+                    if (idx >= 0) switchView(idx);
+                } else {
+                    const saved = localStorage.getItem('monitoring_active_view');
+                    if (saved !== null && parseInt(saved) < activeViews.length) switchView(parseInt(saved));
+                }
+            }
+
+            bindSlowLogEvents();
+        }
+
+        function buildViewSections(view, viewIndex) {
+            return (view.sections || []).map((section, si) => {
+                const sectionId = `v${viewIndex}_s${si}`;
+                switch (section.type) {
+                    case 'built-in':         return buildBuiltInSection(section, sectionId);
+                    case 'cards':            return buildCardsSection(section, sectionId);
+                    case 'chart':            return buildChartSection(section, sectionId);
+                    case 'slow-logs':        return buildSlowLogsSection(sectionId);
+                    case 'all-custom-cards': return buildAllCustomCardsSection(sectionId);
+                    default: return '';
+                }
+            }).join('');
+        }
+
+        function buildBuiltInSection(section, sectionId) {
+            const ids = section.id ? [section.id] : ['http', 'queue', 'database', 'system'];
+            let html = '';
+
+            if (ids.includes('http')) {
+                html += `<div class="grid grid-4" id="${sectionId}_http">
+                    <div class="card"><div class="card-title">HTTP Requests</div><div class="card-value bi-val" data-key="httpTotal">--</div><div class="card-sub bi-sub" data-key="httpSub">--</div></div>
+                    <div class="card"><div class="card-title">Avg Response</div><div class="card-value bi-val" data-key="httpAvg">--</div><div class="card-sub bi-sub" data-key="httpAvgSub">--</div></div>
+                    <div class="card"><div class="card-title">Error Rate</div><div class="card-value bi-val" data-key="errorRate">--</div><div class="card-sub bi-sub" data-key="errorSub">--</div></div>
+                    <div class="card"><div class="card-title">Slow Requests</div><div class="card-value bi-val" data-key="slowReq">--</div><div class="card-sub">above threshold</div></div>
+                </div>`;
+            }
+            if (ids.includes('queue')) {
+                html += `<div class="grid grid-4" id="${sectionId}_queue" style="margin-top:16px">
+                    <div class="card"><div class="card-title">Queue Depth</div><div class="card-value bi-val" data-key="queueDepth">--</div><div class="card-sub bi-sub" data-key="queueSub">--</div></div>
+                    <div class="card"><div class="card-title">Jobs Processed</div><div class="card-value bi-val" data-key="jobsProcessed">--</div><div class="card-sub bi-sub" data-key="jobsSub">--</div></div>
+                </div>`;
+            }
+            if (ids.includes('database')) {
+                html += `<div class="grid grid-4" id="${sectionId}_db" style="margin-top:16px">
+                    <div class="card"><div class="card-title">DB Queries</div><div class="card-value bi-val" data-key="dbQueries">--</div><div class="card-sub bi-sub" data-key="dbSub">--</div></div>
+                    <div class="card"><div class="card-title">Slow Queries</div><div class="card-value bi-val" data-key="dbSlow">--</div><div class="card-sub bi-sub" data-key="dbSlowSub">--</div></div>
+                </div>`;
+            }
+            if (ids.includes('system')) {
+                html += `${section.id ? '' : '<div class="section-title">System & Redis</div>'}
+                <div class="grid grid-4" id="${sectionId}_sys">
+                    <div class="card"><div class="card-title">CPU Load (1m)</div><div class="card-value bi-val" data-key="cpuLoad">--</div></div>
+                    <div class="card"><div class="card-title">Redis Memory</div><div class="card-value bi-val" data-key="redisMem">--</div><div class="card-sub bi-sub" data-key="redisMemSub">--</div></div>
+                    <div class="card"><div class="card-title">Redis Ops/sec</div><div class="card-value bi-val" data-key="redisOps">--</div><div class="card-sub bi-sub" data-key="redisHitRate">--</div></div>
+                    <div class="card"><div class="card-title">Disk Free</div><div class="card-value bi-val" data-key="diskFree">--</div></div>
+                </div>`;
+            }
+
+            // Built-in timeline charts
+            if (!section.id || ids.length > 1) {
+                html += `<div class="section-title">Timeline</div>
+                <div class="grid grid-2">
+                    <div class="card"><div class="card-title">Requests / minute</div><div class="chart-container"><canvas class="bi-chart" data-chart="requests_${sectionId}"></canvas></div></div>
+                    <div class="card"><div class="card-title">Response time (ms)</div><div class="chart-container"><canvas class="bi-chart" data-chart="duration_${sectionId}"></canvas></div></div>
+                    <div class="card"><div class="card-title">Queue depth</div><div class="chart-container"><canvas class="bi-chart" data-chart="queue_${sectionId}"></canvas></div></div>
+                    <div class="card"><div class="card-title">DB queries / minute</div><div class="chart-container"><canvas class="bi-chart" data-chart="db_${sectionId}"></canvas></div></div>
+                </div>`;
+            }
+
+            return html;
+        }
+
+        function buildCardsSection(section, sectionId) {
+            const label = section.label ? `<div class="section-title">${escHtml(section.label)}</div>` : '';
+            return `${label}<div class="grid grid-4 custom-cards" id="cards_${sectionId}" data-keys='${escAttr(JSON.stringify(section.keys || []))}'></div>`;
+        }
+
+        function buildAllCustomCardsSection(sectionId) {
+            return `<div class="section-title all-custom-title" style="display:none">Custom Metrics</div>
+                <div class="grid grid-4 all-custom-cards" id="cards_${sectionId}"></div>`;
+        }
+
+        function buildChartSection(section, sectionId) {
+            const label = section.label || 'Chart';
+            return `<div class="section-title">${escHtml(label)}</div>
+                <div class="grid grid-2">
+                    <div class="card" style="grid-column: span 2"><div class="card-title">${escHtml(label)}</div>
+                    <div class="chart-container"><canvas class="custom-chart" id="chart_${sectionId}"
+                        data-keys='${escAttr(JSON.stringify(section.keys || []))}'
+                        data-colors='${escAttr(JSON.stringify(section.colors || null))}'
+                        data-chart-type='${section.chart_type || "bar"}'
+                        data-gauge='${section.gauge ? "1" : "0"}'
+                    ></canvas></div></div>
+                </div>`;
+        }
+
+        function buildSlowLogsSection(sectionId) {
+            return `<div class="section-title">Slow Logs</div>
+                <div class="card slow-logs-panel">
+                    <div class="slow-controls">
+                        <div class="tabs" style="margin-bottom:0; border-bottom:none;">
+                            <div class="tab slow-type-tab active" data-type="">All</div>
+                            <div class="tab slow-type-tab" data-type="request">Requests</div>
+                            <div class="tab slow-type-tab" data-type="query">Queries</div>
+                        </div>
+                        <div class="sort-controls">
+                            <span style="font-size:11px;color:var(--text-muted);margin-right:4px;">Sort:</span>
+                            <button class="sort-btn slow-sort-btn active" data-sort="duration">Slowest</button>
+                            <button class="sort-btn slow-sort-btn" data-sort="time">Recent</button>
+                        </div>
+                    </div>
+                    <div style="border-bottom:1px solid var(--border); margin-bottom:16px;"></div>
+                    <div class="table-wrapper">
+                        <table>
+                            <thead><tr><th>Type</th><th>Duration</th><th>Detail</th><th>Status</th><th>User</th><th>Time</th></tr></thead>
+                            <tbody class="slow-logs-body"><tr><td colspan="6" class="no-data">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                    <div class="pagination slow-logs-pagination"></div>
+                </div>`;
+        }
+
+        function switchView(index) {
+            activeViewIndex = index;
+            document.querySelectorAll('.view-tab').forEach((t, i) => t.classList.toggle('active', i === index));
+            document.querySelectorAll('.view-page').forEach((p, i) => p.classList.toggle('active', i === index));
+            localStorage.setItem('monitoring_active_view', index);
+            const label = activeViews[index]?.label;
+            if (label) window.history.replaceState(null, '', '#' + slugify(label));
+            if (lastData) updateViewData(lastData);
+        }
+
+        function slugify(str) {
+            return (str || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        }
+
+        // ─── Slow log event binding ───────────────────────────
+        function bindSlowLogEvents() {
+            document.querySelectorAll('.slow-type-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    tab.closest('.slow-logs-panel').querySelectorAll('.slow-type-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    currentSlowType = tab.dataset.type;
+                    currentSlowPage = 1;
+                    fetchSlowLogs();
+                });
+            });
+            document.querySelectorAll('.slow-sort-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    btn.closest('.slow-logs-panel').querySelectorAll('.slow-sort-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentSlowSort = btn.dataset.sort;
+                    currentSlowPage = 1;
+                    fetchSlowLogs();
+                });
+            });
+        }
 
         // ─── Events ─────────────────────────────────────────────
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                currentSlowType = tab.dataset.type;
-                currentSlowPage = 1;
-                fetchSlowLogs();
-            });
-        });
-        document.querySelectorAll('.sort-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                currentSlowSort = btn.dataset.sort;
-                currentSlowPage = 1;
-                fetchSlowLogs();
-            });
-        });
         document.getElementById('periodSelect').addEventListener('change', () => { currentSlowPage = 1; fetchData(); });
         document.getElementById('refreshSelect').addEventListener('change', () => {
             clearInterval(refreshTimer);
@@ -282,12 +416,20 @@
                         document.getElementById('statusDot').className = 'status-dot off';
                         return;
                     }
-                    updateSummary(data.summary);
-                    updateCharts(data.timeline);
+                    lastData = data;
+                    updateViewData(data);
                     document.getElementById('lastUpdate').textContent = 'Updated: ' + new Date().toLocaleTimeString();
                 })
                 .catch(() => { document.getElementById('statusDot').className = 'status-dot error'; });
             fetchSlowLogs();
+        }
+
+        function updateViewData(data) {
+            updateBuiltInCards(data.summary);
+            updateBuiltInCharts(data.timeline);
+            updateCustomCards(data.summary.custom);
+            updateAllCustomCards(data.summary.custom);
+            updateCustomCharts(data.timeline);
         }
 
         function fetchSlowLogs() {
@@ -295,97 +437,88 @@
             let url = `/${basePath}/api/slow-logs?minutes=${minutes}&per_page=25&sort=${currentSlowSort}&page=${currentSlowPage}`;
             if (currentSlowType) url += `&type=${currentSlowType}`;
             fetch(url).then(r => r.json()).then(data => {
-                renderSlowLogs(data.data);
-                renderPagination(data);
+                document.querySelectorAll('.slow-logs-body').forEach(tbody => renderSlowLogs(tbody, data.data));
+                document.querySelectorAll('.slow-logs-pagination').forEach(el => renderPagination(el, data));
             }).catch(() => {});
         }
 
-        // ─── Summary cards ──────────────────────────────────────
-        function updateSummary(s) {
+        // ─── Built-in card updates ────────────────────────────
+        function updateBuiltInCards(s) {
             const dot = document.getElementById('statusDot');
             if (s.error_rate > 5) dot.className = 'status-dot error';
             else if (s.error_rate > 1 || s.queue_depth_default > 100) dot.className = 'status-dot warn';
             else dot.className = 'status-dot ok';
 
-            setVal('httpTotal', fmtNum(s.http_requests_total));
-            setVal('httpSub', `2xx: ${fmtNum(s.http_requests_2xx)} | 4xx: ${fmtNum(s.http_requests_4xx)} | 5xx: ${fmtNum(s.http_requests_5xx)}`);
+            const vals = {
+                httpTotal:     { text: fmtNum(s.http_requests_total) },
+                httpSub:       { text: `2xx: ${fmtNum(s.http_requests_2xx)} | 4xx: ${fmtNum(s.http_requests_4xx)} | 5xx: ${fmtNum(s.http_requests_5xx)}`, isSub: true },
+                httpAvg:       { text: fmtMs(s.http_avg_duration), color: s.http_avg_duration > 2000 ? 'red' : s.http_avg_duration > 500 ? 'yellow' : 'green' },
+                httpAvgSub:    { text: `max: ${fmtMs(s.http_max_duration)}`, isSub: true },
+                errorRate:     { text: s.error_rate + '%', color: s.error_rate > 5 ? 'red' : s.error_rate > 1 ? 'yellow' : 'green' },
+                errorSub:      { text: `${fmtNum(s.http_requests_5xx)} errors`, isSub: true },
+                slowReq:       { text: fmtNum(s.http_slow_requests), color: s.http_slow_requests > 10 ? 'red' : s.http_slow_requests > 0 ? 'yellow' : 'green' },
+                queueDepth:    { text: fmtNum(s.queue_depth_high + s.queue_depth_default + s.queue_depth_low), color: (s.queue_depth_high + s.queue_depth_default + s.queue_depth_low) > 100 ? 'red' : (s.queue_depth_high + s.queue_depth_default + s.queue_depth_low) > 20 ? 'yellow' : 'green' },
+                queueSub:      { text: `H: ${s.queue_depth_high} | D: ${s.queue_depth_default} | L: ${s.queue_depth_low}`, isSub: true },
+                jobsProcessed: { text: fmtNum(s.queue_jobs_processed), color: 'blue' },
+                jobsSub:       { text: `failed: ${fmtNum(s.queue_jobs_failed)}`, isSub: true },
+                dbQueries:     { text: fmtNum(s.db_queries_total) },
+                dbSub:         { text: `avg: ${fmtMs(s.db_avg_query_ms)} | max: ${fmtMs(s.db_max_query_ms)}`, isSub: true },
+                dbSlow:        { text: fmtNum(s.db_slow_queries), color: s.db_slow_queries > 10 ? 'red' : s.db_slow_queries > 0 ? 'yellow' : 'green' },
+                dbSlowSub:     { text: `above ${document.getElementById('periodSelect').selectedOptions[0].text}`, isSub: true },
+                cpuLoad:       { text: s.cpu_load !== null ? s.cpu_load : 'N/A', color: s.cpu_load > 5 ? 'red' : s.cpu_load > 2 ? 'yellow' : 'green' },
+                redisMem:      { text: s.redis_memory_mb !== null ? s.redis_memory_mb + ' MB' : 'N/A', color: 'cyan' },
+                redisMemSub:   { text: s.redis_clients !== null ? s.redis_clients + ' clients' : '', isSub: true },
+                redisOps:      { text: s.redis_ops_per_sec !== null ? fmtNum(s.redis_ops_per_sec) : 'N/A', color: 'cyan' },
+                redisHitRate:  { text: s.redis_hit_rate !== null ? 'hit rate: ' + s.redis_hit_rate + '%' : '', isSub: true },
+                diskFree:      { text: s.disk_free_gb !== null ? s.disk_free_gb + ' GB' : 'N/A', color: s.disk_free_gb < 2 ? 'red' : s.disk_free_gb < 5 ? 'yellow' : 'green' },
+            };
 
-            const avg = s.http_avg_duration;
-            setVal('httpAvg', fmtMs(avg), avg > 2000 ? 'red' : avg > 500 ? 'yellow' : 'green');
-            setVal('httpAvgSub', `max: ${fmtMs(s.http_max_duration)}`);
-            setVal('errorRate', s.error_rate + '%', s.error_rate > 5 ? 'red' : s.error_rate > 1 ? 'yellow' : 'green');
-            setVal('errorSub', `${fmtNum(s.http_requests_5xx)} errors`);
-            setVal('slowReq', fmtNum(s.http_slow_requests), s.http_slow_requests > 10 ? 'red' : s.http_slow_requests > 0 ? 'yellow' : 'green');
-
-            const totalDepth = s.queue_depth_high + s.queue_depth_default + s.queue_depth_low;
-            setVal('queueDepth', fmtNum(totalDepth), totalDepth > 100 ? 'red' : totalDepth > 20 ? 'yellow' : 'green');
-            setVal('queueSub', `H: ${s.queue_depth_high} | D: ${s.queue_depth_default} | L: ${s.queue_depth_low}`);
-            setVal('jobsProcessed', fmtNum(s.queue_jobs_processed), 'blue');
-            setVal('jobsSub', `failed: ${fmtNum(s.queue_jobs_failed)}`);
-
-            setVal('dbQueries', fmtNum(s.db_queries_total));
-            setVal('dbSub', `avg: ${fmtMs(s.db_avg_query_ms)} | max: ${fmtMs(s.db_max_query_ms)}`);
-            setVal('dbSlow', fmtNum(s.db_slow_queries), s.db_slow_queries > 10 ? 'red' : s.db_slow_queries > 0 ? 'yellow' : 'green');
-            setVal('dbSlowSub', `above ${document.getElementById('periodSelect').selectedOptions[0].text}`);
-
-            setVal('cpuLoad', s.cpu_load !== null ? s.cpu_load : 'N/A', s.cpu_load > 5 ? 'red' : s.cpu_load > 2 ? 'yellow' : 'green');
-            setVal('redisMem', s.redis_memory_mb !== null ? s.redis_memory_mb + ' MB' : 'N/A', 'cyan');
-            setVal('redisMemSub', s.redis_clients !== null ? s.redis_clients + ' clients' : '');
-            setVal('redisOps', s.redis_ops_per_sec !== null ? fmtNum(s.redis_ops_per_sec) : 'N/A', 'cyan');
-            setVal('redisHitRate', s.redis_hit_rate !== null ? 'hit rate: ' + s.redis_hit_rate + '%' : '');
-            setVal('diskFree', s.disk_free_gb !== null ? s.disk_free_gb + ' GB' : 'N/A', s.disk_free_gb < 2 ? 'red' : s.disk_free_gb < 5 ? 'yellow' : 'green');
-
-            renderCustomMetrics(s.custom);
-        }
-
-        function renderCustomMetrics(custom) {
-            const container = document.getElementById('customCards');
-            const title = document.getElementById('customTitle');
-            if (!custom || Object.keys(custom).length === 0) { container.innerHTML = ''; title.style.display = 'none'; return; }
-            title.style.display = '';
-            container.innerHTML = Object.entries(custom).map(([key, value]) => {
-                const label = formatMetricLabel(key);
-                const formatted = formatMetricValue(key, value);
-                const color = getMetricColor(key, value);
-                return `<div class="card"><div class="card-title">${escHtml(label)}</div><div class="card-value ${color}">${formatted}</div></div>`;
-            }).join('');
+            document.querySelectorAll('.bi-val').forEach(el => {
+                const v = vals[el.dataset.key];
+                if (v) { el.textContent = v.text; if (v.color) el.className = 'card-value bi-val ' + v.color; }
+            });
+            document.querySelectorAll('.bi-sub').forEach(el => {
+                const v = vals[el.dataset.key];
+                if (v) el.textContent = v.text;
+            });
         }
 
         // ─── Built-in charts ────────────────────────────────────
-        function updateCharts(timeline) {
+        function updateBuiltInCharts(timeline) {
             if (!timeline || timeline.length === 0) return;
             const labels = timeline.map(d => d.time);
 
-            // Requests
-            renderChart('chartRequests', labels, [
-                { label: 'Requests', data: timeline.map(d => d.requests), ...COLORS.blue, type: 'bar' },
-                { label: '5xx Errors', data: timeline.map(d => d.errors_5xx), ...COLORS.red, type: 'bar' },
-            ], chartOptsMultiLegend());
+            document.querySelectorAll('.bi-chart').forEach(canvas => {
+                const chartKey = canvas.dataset.chart;
+                const type = chartKey.split('_')[0];
 
-            // Response time
-            renderChart('chartDuration', labels, [
-                { label: 'Avg', data: timeline.map(d => d.avg_duration), borderColor: COLORS.blue.border, backgroundColor: COLORS.blue.bg, type: 'line', fill: true, tension: 0.3, pointRadius: 0 },
-                { label: 'Max', data: timeline.map(d => d.max_duration), borderColor: COLORS.red.border, backgroundColor: 'transparent', type: 'line', borderDash: [4, 4], tension: 0.3, pointRadius: 0 },
-            ], chartOptsMultiLegend('ms'));
-
-            // Queue
-            renderChart('chartQueue', labels, [
-                { label: 'High', data: timeline.map(d => d.queue_high), ...COLORS.red, type: 'bar', stack: 'q' },
-                { label: 'Default', data: timeline.map(d => d.queue_default), ...COLORS.yellow, type: 'bar', stack: 'q' },
-                { label: 'Low', data: timeline.map(d => d.queue_low), ...COLORS.blue, type: 'bar', stack: 'q' },
-            ], (() => { const o = chartOptsMultiLegend(); o.scales.x.stacked = true; o.scales.y.stacked = true; return o; })());
-
-            // DB queries
-            renderChart('chartDb', labels, [
-                { label: 'Queries', data: timeline.map(d => d.db_queries), ...COLORS.purple, type: 'bar' },
-                { label: 'Slow', data: timeline.map(d => d.db_slow), ...COLORS.red, type: 'bar' },
-            ], chartOptsMultiLegend());
-
-            // Custom charts
-            renderCustomCharts(timeline, labels);
+                if (type === 'requests') {
+                    renderChart(chartKey, canvas, labels, [
+                        { label: 'Requests', data: timeline.map(d => d.requests), ...COLORS.blue, type: 'bar' },
+                        { label: '5xx Errors', data: timeline.map(d => d.errors_5xx), ...COLORS.red, type: 'bar' },
+                    ], chartOptsMultiLegend());
+                } else if (type === 'duration') {
+                    renderChart(chartKey, canvas, labels, [
+                        { label: 'Avg', data: timeline.map(d => d.avg_duration), borderColor: COLORS.blue.border, backgroundColor: COLORS.blue.bg, type: 'line', fill: true, tension: 0.3, pointRadius: 0 },
+                        { label: 'Max', data: timeline.map(d => d.max_duration), borderColor: COLORS.red.border, backgroundColor: 'transparent', type: 'line', borderDash: [4, 4], tension: 0.3, pointRadius: 0 },
+                    ], chartOptsMultiLegend('ms'));
+                } else if (type === 'queue') {
+                    const o = chartOptsMultiLegend(); o.scales.x.stacked = true; o.scales.y.stacked = true;
+                    renderChart(chartKey, canvas, labels, [
+                        { label: 'High', data: timeline.map(d => d.queue_high), ...COLORS.red, type: 'bar', stack: 'q' },
+                        { label: 'Default', data: timeline.map(d => d.queue_default), ...COLORS.yellow, type: 'bar', stack: 'q' },
+                        { label: 'Low', data: timeline.map(d => d.queue_low), ...COLORS.blue, type: 'bar', stack: 'q' },
+                    ], o);
+                } else if (type === 'db') {
+                    renderChart(chartKey, canvas, labels, [
+                        { label: 'Queries', data: timeline.map(d => d.db_queries), ...COLORS.purple, type: 'bar' },
+                        { label: 'Slow', data: timeline.map(d => d.db_slow), ...COLORS.red, type: 'bar' },
+                    ], chartOptsMultiLegend());
+                }
+            });
         }
 
-        function renderChart(canvasId, labels, datasets, options) {
+        function renderChart(chartKey, canvas, labels, datasets, options) {
             const ds = datasets.map(d => ({
                 label: d.label,
                 data: d.data,
@@ -402,94 +535,85 @@
                 order: d.type === 'line' ? 0 : 1,
             }));
 
-            if (charts[canvasId]) {
-                charts[canvasId].data.labels = labels;
-                charts[canvasId].data.datasets.forEach((existing, i) => {
+            if (charts[chartKey]) {
+                charts[chartKey].data.labels = labels;
+                charts[chartKey].data.datasets.forEach((existing, i) => {
                     if (ds[i]) existing.data = ds[i].data;
                 });
-                charts[canvasId].update('none');
+                charts[chartKey].update('none');
                 return;
             }
 
-            const canvas = document.getElementById(canvasId);
             if (!canvas) return;
-            charts[canvasId] = new Chart(canvas, { type: 'bar', data: { labels, datasets: ds }, options });
+            charts[chartKey] = new Chart(canvas, { type: 'bar', data: { labels, datasets: ds }, options });
         }
 
-        // ─── Custom charts ──────────────────────────────────────
-        const SAFE_COLORS = [COLORS.blue, COLORS.green, COLORS.yellow, COLORS.purple, COLORS.cyan, COLORS.orange, COLORS.pink];
-        const ERROR_PATTERN = /error|5xx|fail|slow|max|high|timeout/i;
-
-        function resolveColor(name) { return COLORS[name] || null; }
-
-        function getCustomMetricColor(key, index, colorMap) {
-            if (colorMap) {
-                const clean = key.replace('c:', '');
-                // Per-key color: { 'metric_name': 'red' }
-                if (typeof colorMap === 'object' && !Array.isArray(colorMap)) {
-                    // Check exact key match first, then wildcard patterns
-                    if (colorMap[clean]) return resolveColor(colorMap[clean]) || COLORS.blue;
-                    for (const [pattern, color] of Object.entries(colorMap)) {
-                        if (pattern.endsWith('*') && clean.startsWith(pattern.slice(0, -1))) {
-                            return resolveColor(color) || COLORS.blue;
-                        }
-                    }
-                }
-                // Indexed array: ['blue', 'red', 'green']
-                if (Array.isArray(colorMap) && colorMap[index]) {
-                    return resolveColor(colorMap[index]) || COLORS.blue;
-                }
-            }
-            if (ERROR_PATTERN.test(key)) return COLORS.red;
-            return SAFE_COLORS[index % SAFE_COLORS.length];
-        }
-
-        function matchesPattern(key, pattern) {
-            if (pattern.endsWith('*')) {
-                return key.startsWith(pattern.slice(0, -1));
-            }
-            return key === pattern;
-        }
-
-        function renderCustomCharts(timeline, labels) {
-            const grid = document.getElementById('customChartsGrid');
-            const title = document.getElementById('customChartsTitle');
-
-            const allCustomKeys = {};
-            timeline.forEach(row => Object.keys(row).forEach(k => { if (k.startsWith('c:')) allCustomKeys[k] = true; }));
-            const keys = Object.keys(allCustomKeys);
-
-            if (keys.length === 0) { grid.innerHTML = ''; title.style.display = 'none'; return; }
-            title.style.display = '';
-
-            let groups;
-            if (customChartConfig.length > 0) {
-                groups = buildConfigGroups(keys);
-            } else {
-                groups = autoGroupKeys(keys);
-            }
-
-            // Destroy old custom charts
-            Object.keys(charts).forEach(k => {
-                if (k.startsWith('customChart_')) { charts[k].destroy(); delete charts[k]; }
+        // ─── Custom cards (pattern-matched) ──────────────────
+        function updateCustomCards(custom) {
+            if (!custom) return;
+            document.querySelectorAll('.custom-cards').forEach(container => {
+                const patterns = JSON.parse(container.dataset.keys || '[]');
+                const matchedKeys = Object.keys(custom).filter(k => patterns.some(p => matchesPattern(k, p)));
+                if (matchedKeys.length === 0) { container.innerHTML = ''; return; }
+                container.innerHTML = matchedKeys.map(key => {
+                    const label = formatMetricLabel(key);
+                    const formatted = formatMetricValue(key, custom[key]);
+                    const color = getMetricColor(key, custom[key]);
+                    return `<div class="card"><div class="card-title">${escHtml(label)}</div><div class="card-value ${color}">${formatted}</div></div>`;
+                }).join('');
             });
+        }
 
-            grid.innerHTML = groups.map(g =>
-                `<div class="card"><div class="card-title">${escHtml(g.label)}</div><div class="chart-container"><canvas id="${g.id}"></canvas></div></div>`
-            ).join('');
+        // ─── All custom cards (default view fallback) ─────────
+        function updateAllCustomCards(custom) {
+            document.querySelectorAll('.all-custom-cards').forEach(container => {
+                const title = container.previousElementSibling;
+                if (!custom || Object.keys(custom).length === 0) {
+                    container.innerHTML = '';
+                    if (title && title.classList.contains('all-custom-title')) title.style.display = 'none';
+                    return;
+                }
+                if (title && title.classList.contains('all-custom-title')) title.style.display = '';
+                container.innerHTML = Object.entries(custom).map(([key, value]) => {
+                    const label = formatMetricLabel(key);
+                    const formatted = formatMetricValue(key, value);
+                    const color = getMetricColor(key, value);
+                    return `<div class="card"><div class="card-title">${escHtml(label)}</div><div class="card-value ${color}">${formatted}</div></div>`;
+                }).join('');
+            });
+        }
 
-            groups.forEach(group => {
+        // ─── Custom charts ───────────────────────────────────
+        function updateCustomCharts(timeline) {
+            if (!timeline || timeline.length === 0) return;
+            const labels = timeline.map(d => d.time);
+
+            document.querySelectorAll('.custom-chart').forEach(canvas => {
+                const chartKey = canvas.id;
+                const patterns = JSON.parse(canvas.dataset.keys || '[]');
+                const colors = JSON.parse(canvas.dataset.colors || 'null');
+                const chartType = canvas.dataset.chartType || 'bar';
+                const isLineChart = chartType === 'line';
+
+                const allTimelineKeys = {};
+                timeline.forEach(row => Object.keys(row).forEach(k => { if (k.startsWith('c:')) allTimelineKeys[k] = true; }));
+                const matchedKeys = Object.keys(allTimelineKeys).filter(k => {
+                    const clean = k.replace('c:', '');
+                    return patterns.some(p => matchesPattern(clean, p));
+                });
+
+                if (matchedKeys.length === 0) return;
+
                 let colorIndex = 0;
-                const isLineChart = group.type === 'line';
-                const datasets = group.keys.map((key) => {
+                const datasets = matchedKeys.map(key => {
                     const label = formatMetricLabel(key.replace('c:', ''));
                     const isRate = isLineChart || key.includes('avg') || key.includes('_ms') || key.includes('_rate');
-                    const c = getCustomMetricColor(key, colorIndex++, group.colors);
+                    const c = getCustomMetricColor(key, colorIndex++, colors);
                     return {
                         label,
                         data: timeline.map(d => d[key] || 0),
-                        backgroundColor: c.bg,
-                        borderColor: c.border,
+                        bg: c.bg,
+                        border: c.border,
                         borderWidth: isRate ? 2 : 0,
                         type: isRate ? 'line' : 'bar',
                         fill: isRate && !isLineChart,
@@ -499,109 +623,17 @@
                     };
                 });
 
-                const opts = chartOptsMultiLegend();
-                charts[group.id] = new Chart(document.getElementById(group.id), {
-                    type: isLineChart ? 'line' : 'bar',
-                    data: { labels, datasets },
-                    options: opts,
-                });
+                if (charts[chartKey] && charts[chartKey].data.datasets.length !== datasets.length) {
+                    charts[chartKey].destroy();
+                    delete charts[chartKey];
+                }
+
+                renderChart(chartKey, canvas, labels, datasets, chartOptsMultiLegend());
             });
         }
 
-        // Build groups from user-defined config, leftover keys auto-grouped
-        function buildConfigGroups(allKeys) {
-            const claimed = new Set();
-            const groups = [];
-
-            customChartConfig.forEach((cfg, i) => {
-                const matched = allKeys.filter(k => {
-                    const clean = k.replace('c:', '');
-                    return (cfg.keys || []).some(pattern => matchesPattern(clean, pattern));
-                });
-                matched.forEach(k => claimed.add(k));
-                if (matched.length > 0) {
-                    groups.push({
-                        id: 'customChart_cfg_' + i,
-                        label: cfg.label || 'Custom ' + (i + 1),
-                        keys: matched,
-                        colors: cfg.colors || null,
-                        type: cfg.type || null,
-                    });
-                }
-            });
-
-            // Unclaimed keys are intentionally excluded when custom_charts is defined.
-            // They are still visible as summary cards above the charts.
-
-            return groups;
-        }
-
-        // Auto-group by shared prefix with merge logic
-        function autoGroupKeys(keys) {
-            const cleanKeys = keys.map(k => k.replace('c:', ''));
-
-            // Find the longest prefix shared with at least one other key
-            const keyToPrefix = {};
-            cleanKeys.forEach(key => {
-                const parts = key.split('_');
-                let bestPrefix = parts[0];
-                for (let len = parts.length - 1; len >= 1; len--) {
-                    const prefix = parts.slice(0, len).join('_');
-                    if (cleanKeys.some(other => other !== key && other.startsWith(prefix + '_'))) {
-                        bestPrefix = prefix;
-                        break;
-                    }
-                }
-                keyToPrefix[key] = bestPrefix;
-            });
-
-            const prefixMap = {};
-            cleanKeys.forEach(key => {
-                const p = keyToPrefix[key];
-                if (!prefixMap[p]) prefixMap[p] = [];
-                prefixMap[p].push('c:' + key);
-            });
-
-            // Merge small groups (<=2 items) into the closest group sharing a common first segment
-            let changed = true;
-            while (changed) {
-                changed = false;
-                const entries = Object.entries(prefixMap);
-                for (const [prefix, items] of entries) {
-                    if (!prefixMap[prefix] || items.length > 2) continue;
-                    const parts = prefix.split('_');
-                    let bestTarget = null, bestCommon = 0;
-                    for (const [other] of entries) {
-                        if (other === prefix || !prefixMap[other]) continue;
-                        const op = other.split('_');
-                        let common = 0;
-                        while (common < parts.length && common < op.length && parts[common] === op[common]) common++;
-                        if (common > bestCommon) { bestCommon = common; bestTarget = other; }
-                    }
-                    if (bestTarget && bestCommon >= 1) {
-                        prefixMap[bestTarget].push(...items);
-                        delete prefixMap[prefix];
-                        changed = true;
-                        break;
-                    }
-                }
-            }
-
-            const groups = [];
-            const maxPerChart = 5;
-            Object.entries(prefixMap).forEach(([prefix, groupKeys]) => {
-                for (let i = 0; i < groupKeys.length; i += maxPerChart) {
-                    const chunk = groupKeys.slice(i, i + maxPerChart);
-                    const suffix = groupKeys.length > maxPerChart ? ` (${Math.floor(i/maxPerChart)+1})` : '';
-                    groups.push({ id: 'customChart_' + prefix + '_' + i, label: formatMetricLabel(prefix) + suffix, keys: chunk, colors: null });
-                }
-            });
-            return groups;
-        }
-
-        // ─── Slow logs table ────────────────────────────────────
-        function renderSlowLogs(logs) {
-            const tbody = document.getElementById('slowLogsBody');
+        // ─── Slow logs ──────────────────────────────────────────
+        function renderSlowLogs(tbody, logs) {
             if (!logs || logs.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="no-data">No slow logs in this period</td></tr>'; return; }
             tbody.innerHTML = logs.map(log => `<tr>
                 <td><span class="badge badge-${log.type}">${log.type}</span></td>
@@ -613,8 +645,7 @@
             </tr>`).join('');
         }
 
-        function renderPagination(data) {
-            const container = document.getElementById('slowLogsPagination');
+        function renderPagination(container, data) {
             if (!data || data.last_page <= 1) { container.innerHTML = ''; return; }
             const { page, last_page, total } = data;
             let html = `<button class="page-btn" onclick="goToPage(1)" ${page <= 1 ? 'disabled' : ''}>&laquo;</button>`;
@@ -631,23 +662,43 @@
         }
         function goToPage(p) { currentSlowPage = p; fetchSlowLogs(); }
 
-        // ─── Helpers ────────────────────────────────────────────
-        function setVal(id, value, colorClass) {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.textContent = value;
-            if (colorClass && el.classList.contains('card-value')) el.className = 'card-value ' + colorClass;
+        // ─── Shared helpers ─────────────────────────────────────
+        function resolveColor(name) { return COLORS[name] || null; }
+
+        function getCustomMetricColor(key, index, colorMap) {
+            if (colorMap) {
+                const clean = key.replace('c:', '');
+                if (typeof colorMap === 'object' && !Array.isArray(colorMap)) {
+                    if (colorMap[clean]) return resolveColor(colorMap[clean]) || COLORS.blue;
+                    for (const [pattern, color] of Object.entries(colorMap)) {
+                        if (pattern.endsWith('*') && clean.startsWith(pattern.slice(0, -1))) {
+                            return resolveColor(color) || COLORS.blue;
+                        }
+                    }
+                }
+                if (Array.isArray(colorMap) && colorMap[index]) {
+                    return resolveColor(colorMap[index]) || COLORS.blue;
+                }
+            }
+            if (ERROR_PATTERN.test(key)) return COLORS.red;
+            return SAFE_COLORS[index % SAFE_COLORS.length];
         }
+
+        function matchesPattern(key, pattern) {
+            if (pattern.endsWith('*')) return key.startsWith(pattern.slice(0, -1));
+            return key === pattern;
+        }
+
         function fmtNum(n) { if (n === null || n === undefined) return 'N/A'; if (n >= 1e6) return (n/1e6).toFixed(1)+'M'; if (n >= 1e3) return (n/1e3).toFixed(1)+'K'; return Number.isInteger(n) ? n.toString() : parseFloat(n.toFixed(2)).toString(); }
         function fmtMs(ms) { if (ms === null || ms === undefined) return 'N/A'; if (ms >= 1000) return (ms/1000).toFixed(1)+'s'; return parseFloat(ms.toFixed(1))+'ms'; }
         function truncate(s, len) { return s && s.length > len ? s.substring(0, len) + '...' : (s || ''); }
         function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+        function escAttr(s) { return s.replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
         function statusBadge(code) { const cls = code >= 500 ? 'badge-slow' : code >= 400 ? 'badge-request' : 'badge-ok'; return `<span class="badge ${cls}">${code}</span>`; }
         function formatMetricLabel(key) { return key.replace(/_/g, ' ').replace(/\b(ms|mb|gb)\b/gi, m => m.toUpperCase()).replace(/\b(avg|max|p95|api)\b/gi, m => m.toUpperCase()).replace(/^\w/, c => c.toUpperCase()); }
         function formatMetricValue(key, value) {
             if (value === null || value === undefined) return 'N/A';
             if (typeof value === 'string') return value;
-            // Check custom formats from config
             const fmt = findCustomFormat(key);
             if (fmt) {
                 let v = value;
@@ -655,7 +706,6 @@
                 const dec = fmt.decimals !== undefined ? fmt.decimals : 1;
                 return parseFloat(v.toFixed(dec)) + (fmt.suffix || '');
             }
-            // Built-in formats
             if (key.includes('_ms')) return fmtMs(value);
             if (key.includes('_mb')) return parseFloat(value.toFixed(1))+' MB';
             if (key.includes('_gb')) return parseFloat(value.toFixed(1))+' GB';
@@ -663,7 +713,7 @@
             return fmtNum(value);
         }
         function findCustomFormat(key) {
-            for (const cfg of customChartConfig) {
+            for (const cfg of metricConfigs) {
                 if (!cfg.format) continue;
                 const keys = cfg.keys || [];
                 if (keys.some(pattern => matchesPattern(key, pattern))) return cfg.format;
@@ -673,6 +723,7 @@
         function getMetricColor(key, value) { if (value === null || value === undefined) return ''; if (typeof value === 'string') { if (value === 'running') return 'green'; if (value === 'inactive' || value === 'unknown') return 'red'; return ''; } if (key.includes('error') && value > 0) return 'red'; if (key.includes('rate_limit') && value > 0) return 'yellow'; return ''; }
 
         // ─── Init ───────────────────────────────────────────────
+        initDashboard();
         fetchData();
         const initialRefresh = parseInt(document.getElementById('refreshSelect').value);
         if (initialRefresh > 0) refreshTimer = setInterval(fetchData, initialRefresh * 1000);
