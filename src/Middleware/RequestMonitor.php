@@ -13,7 +13,7 @@ class RequestMonitor
 
     public function __construct(MetricsService $metrics)
     {
-        $this->monitoring = $metrics;
+        $this->metrics = $metrics;
     }
 
     public function handle(Request $request, Closure $next): Response
@@ -26,26 +26,26 @@ class RequestMonitor
         $statusCode = $response->getStatusCode();
 
         // Increment Redis counters for aggregate metrics
-        $this->monitoring->increment('http', 'requests_total');
-        $this->monitoring->pushToList('http', 'durations', round($durationMs, 2));
+        $this->metrics->increment('http', 'requests_total');
+        $this->metrics->pushToList('http', 'durations', round($durationMs, 2));
 
         if ($statusCode >= 200 && $statusCode < 300) {
-            $this->monitoring->increment('http', 'requests_2xx');
+            $this->metrics->increment('http', 'requests_2xx');
         } elseif ($statusCode >= 400 && $statusCode < 500) {
-            $this->monitoring->increment('http', 'requests_4xx');
+            $this->metrics->increment('http', 'requests_4xx');
         } elseif ($statusCode >= 500) {
-            $this->monitoring->increment('http', 'requests_5xx');
+            $this->metrics->increment('http', 'requests_5xx');
         }
 
         // Check if this is a slow request
         $threshold = $this->getThreshold($request);
 
         if ($durationMs > $threshold) {
-            $this->monitoring->increment('http', 'slow_requests');
+            $this->metrics->increment('http', 'slow_requests');
 
             $route = $request->route();
 
-            $this->monitoring->logSlowRequest(
+            $this->metrics->logSlowRequest(
                 $request->method(),
                 $request->fullUrl(),
                 $route ? $route->uri() : null,
