@@ -2,8 +2,13 @@
 
 namespace Npabisz\LaravelMetrics;
 
+use Illuminate\Console\Events\CommandFinished;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Queue\Events\JobExceptionOccurred;
+use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
@@ -41,6 +46,7 @@ class MetricsServiceProvider extends ServiceProvider
         $this->registerSchedule();
         $this->registerMiddleware();
         $this->registerQueryListener();
+        $this->registerFlush();
         $this->registerRoutes();
         $this->registerDashboard();
         $this->registerGate();
@@ -151,6 +157,38 @@ class MetricsServiceProvider extends ServiceProvider
         }
 
         Event::listen(QueryExecuted::class, QueryListener::class);
+    }
+
+    /**
+     * When the values recorded in batch mode go to Redis: once the response
+     * has been sent (also for each request of an Octane worker, which
+     * terminates every request), after each queue job, and after each
+     * console command.
+     */
+    protected function registerFlush(): void
+    {
+        if (!config('metrics.batch.enabled', true)) {
+            return;
+        }
+
+        // The container is passed in rather than taken from $this->app: under
+        // Octane each request runs in a copy of the application, which holds
+        // the service that request recorded into.
+        $this->app->terminating(function (Container $app) {
+            static::flushIfResolved($app);
+        });
+
+        Event::listen(
+            [JobProcessed::class, JobExceptionOccurred::class, JobFailed::class, CommandFinished::class],
+            fn () => static::flushIfResolved(app())
+        );
+    }
+
+    protected static function flushIfResolved(Container $app): void
+    {
+        if ($app->resolved(MetricsService::class)) {
+            $app->make(MetricsService::class)->flush();
+        }
     }
 
     protected function registerRoutes(): void

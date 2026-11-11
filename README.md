@@ -75,6 +75,10 @@ METRICS_API_TOKEN=your-secret-token
 METRICS_REDIS_PREFIX=monitoring:
 METRICS_REDIS_CONNECTION=default
 
+# Batching: send what a request, job or command recorded in one round trip
+METRICS_BATCH=true
+METRICS_BATCH_SIZE=500
+
 # Retention
 METRICS_RETENTION_METRICS=30
 METRICS_RETENTION_SLOW_LOGS=14
@@ -416,6 +420,8 @@ $result = doSomething();
 $duration = (microtime(true) - $start) * 1000;
 $monitoring->pushToList('my_group', 'durations', round($duration, 1));
 ```
+
+With batching on (`METRICS_BATCH`, the default), `increment()` and `pushToList()` only record in memory. Everything recorded is sent to Redis in one pipeline after the response has been sent, after each queue job, after each console command, or once `METRICS_BATCH_SIZE` values are waiting - whichever comes first. With request and query tracking on, that is one round trip per request instead of three per request plus two per database query. A key still gets its TTL only when it is created (a second, rare round trip), so values nobody collects do not pile up. Call `flush()` to send earlier; `flushRedisCounters()` does so itself. Values recorded by a request that ends in a fatal error are lost.
 
 Then create a collector that reads these counters:
 

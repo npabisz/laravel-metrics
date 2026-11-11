@@ -137,6 +137,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Batching
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, counters and lists recorded during a request, a queue job
+    | or a console command are kept in memory and sent to Redis in a single
+    | round trip once the response has gone out (or the job or command has
+    | finished), instead of one round trip per value - with query tracking on,
+    | two for every database query. 'size' is how many values may wait before
+    | they are sent anyway, which bounds what a long-running process holds.
+    | Values recorded by a request that dies of a fatal error are lost.
+    |
+    */
+
+    'batch' => [
+        'enabled' => env('METRICS_BATCH', true),
+        'size' => env('METRICS_BATCH_SIZE', 500),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Routes
     |--------------------------------------------------------------------------
     | Enable built-in JSON API routes for reading metrics.

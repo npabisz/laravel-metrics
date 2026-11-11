@@ -9,9 +9,32 @@ use Npabisz\LaravelMetrics\Models\SlowLog;
 
 class MetricsService
 {
+    /**
+     * Seconds a counter, list or key index lives in Redis after it is
+     * created, should monitoring:collect not take it before.
+     */
+    protected const KEY_TTL = 120;
+
     protected bool $enabled;
     protected ?string $redisConnection = null;
     protected ?string $redisPrefix = null;
+    protected bool $batch;
+    protected int $batchSize;
+
+    /**
+     * What increment() and pushToList() recorded since the last flush().
+     *
+     * @var array<string, int> Redis key => amount
+     */
+    protected array $pendingCounters = [];
+
+    /** @var array<string, array> Redis key => values, in order */
+    protected array $pendingLists = [];
+
+    /** @var array<string, array<string, true>> group => keys to register in its index */
+    protected array $pendingKeys = [];
+
+    protected int $pendingCount = 0;
 
     /** @var callable|null */
     protected static $alertCallback = null;
@@ -21,6 +44,8 @@ class MetricsService
         $this->enabled = (bool) config('metrics.enabled', true);
         $this->redisConnection = config('metrics.redis_connection', 'default');
         $this->redisPrefix = config('metrics.redis_prefix', 'monitoring:');
+        $this->batch = (bool) config('metrics.batch.enabled', true);
+        $this->batchSize = max(1, (int) config('metrics.batch.size', 500));
     }
 
     public function isEnabled(): bool
@@ -45,6 +70,15 @@ class MetricsService
     {
         if (!$this->enabled) return;
 
+        if ($this->batch) {
+            $redisKey = $this->redisPrefix . $group . ':' . $key;
+            $this->pendingCounters[$redisKey] = ($this->pendingCounters[$redisKey] ?? 0) + $amount;
+            $this->pendingKeys[$group][$key] = true;
+            $this->recorded();
+
+            return;
+        }
+
         try {
             $redisKey = $this->redisPrefix . $group . ':' . $key;
             $redis = Redis::connection($this->redisConnection);
@@ -67,6 +101,14 @@ class MetricsService
     {
         if (!$this->enabled) return;
 
+        if ($this->batch) {
+            $this->pendingLists[$this->redisPrefix . $group . ':' . $key][] = $value;
+            $this->pendingKeys[$group][$key] = true;
+            $this->recorded();
+
+            return;
+        }
+
         try {
             $redisKey = $this->redisPrefix . $group . ':' . $key;
             $redis = Redis::connection($this->redisConnection);
@@ -80,6 +122,107 @@ class MetricsService
         } catch (\Throwable $e) {
             // Silently fail
         }
+    }
+
+    /**
+     * Send everything increment() and pushToList() recorded since the last
+     * call to Redis, in one round trip.
+     *
+     * A key gets its TTL when it is created, not on every write, so that a
+     * list nobody collects stops growing. Which keys this flush created is
+     * known only from the replies, so their TTL goes out in a second round
+     * trip - in practice once per collection interval, by the first flush
+     * after monitoring:collect took the previous keys.
+     *
+     * Called after the response is sent, after each queue job and after each
+     * console command (see MetricsServiceProvider), and on its own once
+     * 'batch.size' values are waiting.
+     */
+    public function flush(): void
+    {
+        if ($this->pendingCount === 0) return;
+
+        $commands = [];
+
+        foreach ($this->pendingCounters as $redisKey => $amount) {
+            $commands[] = ['incrby', $redisKey, $amount, fn ($reply) => (int) $reply === $amount];
+        }
+
+        foreach ($this->pendingLists as $redisKey => $values) {
+            $commands[] = ['rpush', $redisKey, $values, fn ($reply) => (int) $reply === count($values)];
+        }
+
+        foreach ($this->pendingKeys as $group => $keys) {
+            // A new member means the index was taken by monitoring:collect
+            // (or has expired) and has just been created again.
+            $commands[] = ['sadd', $this->redisPrefix . '_keys:' . $group, array_keys($keys), fn ($reply) => (int) $reply > 0];
+        }
+
+        $this->pendingCounters = [];
+        $this->pendingLists = [];
+        $this->pendingKeys = [];
+        $this->pendingCount = 0;
+
+        try {
+            $redis = Redis::connection($this->redisConnection);
+
+            $replies = $redis->pipeline(function ($pipe) use ($commands) {
+                foreach ($commands as [$command, $redisKey, $argument]) {
+                    $this->pipe($pipe, $command, $redisKey, $argument);
+                }
+            });
+
+            $created = [];
+
+            foreach ($commands as $index => [, $redisKey, , $wasCreated]) {
+                $reply = $replies[$index] ?? null;
+
+                if (is_numeric($reply) && $wasCreated($reply)) {
+                    $created[] = $redisKey;
+                }
+            }
+
+            if ($created) {
+                $redis->pipeline(function ($pipe) use ($created) {
+                    foreach ($created as $redisKey) {
+                        $pipe->expire($redisKey, static::KEY_TTL);
+                    }
+                });
+            }
+        } catch (\Throwable $e) {
+            // Silently fail — monitoring should not break the app
+        }
+    }
+
+    /**
+     * Number of values recorded and not yet sent to Redis.
+     */
+    public function pendingCount(): int
+    {
+        return $this->pendingCount;
+    }
+
+    protected function recorded(): void
+    {
+        if (++$this->pendingCount >= $this->batchSize) {
+            $this->flush();
+        }
+    }
+
+    /**
+     * Queue a command taking several values on a pipeline. Predis takes them
+     * as an array; phpredis hands Laravel's pipeline its own client, which
+     * takes them as separate arguments.
+     */
+    protected function pipe($pipe, string $command, string $redisKey, $argument): void
+    {
+        if (is_array($argument) && $pipe instanceof \Redis) {
+            $pipe->{$command}($redisKey, ...$argument);
+
+            return;
+        }
+
+        $pipe->{$command}($redisKey, $argument);
     }
 
     /**
@@ -141,6 +284,9 @@ class MetricsService
     public function flushRedisCounters(string $group): array
     {
         $data = [];
+
+        // What this process recorded counts too.
+        $this->flush();
 
         try {
             $redis = Redis::connection($this->redisConnection);
