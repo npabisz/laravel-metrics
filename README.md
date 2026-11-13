@@ -132,19 +132,17 @@ Strategies: `sum` (default), `avg` (weighted), `max`, `latest`. Unmatched keys a
 Available at `/{path}` (default: `/metrics`). Protected by the `viewMetrics` gate.
 
 **Features:**
-- Summary cards — HTTP requests, response times, error rate, queue depth, DB queries, Redis stats, CPU, disk
-- Timeline charts — requests/min, response time (avg+max), queue depth, DB queries/min
-- Custom metric cards and charts — display any data from your custom collectors
-- Ranked list sections — display top-N items (e.g. top domains by webhook count)
-- Tabbed views — organize metrics into multiple pages for readability
-- Slow logs browser — filterable table (all / requests / queries), sorted by duration or time, paginated
-- Auto-refresh — configurable interval (10s / 30s / 60s)
-- Period selector — 5min to 30 days
+- KPI strips — headline numbers with sparklines, coloured by status rules (lime = healthy, orange = needs attention, red = critical)
+- Panels — charts with inline stats, key/value rows, meters, tables, ranked bars and per-label trend small multiples, composed in config
+- Expressions — any value can be a metric key, arithmetic (`errors / calls * 100`) or a pattern function (`sum(container_*_memory_mb)`)
+- Tabbed views — organise metrics into pages, linkable via URL hash
+- Slow log — slowest or most recent requests and queries, filterable by type and route pattern, paginated
+- Status pill — configurable health rules summarised in the header
+- Period selector and auto-refresh — configurable ranges (default 15m / 1h / 6h / 24h) and interval (default 30 s)
 - Multi-resolution — raw 1-min data for short periods, 5-min grouped for mid-range, hourly rollups for days/weeks
 - Crosshair sync — hovering on any chart shows a synced vertical line across all charts for time correlation
-- Configurable chart labels — short display names via `labels` config, or dynamic labels via `labels_from`
-- Configurable card colors — threshold-based color rules via `value_colors`
-- Tooltip formatting — auto-detects units from key names, or uses explicit `format` config
+- Pinned time — click a chart to pin that moment: a solid line marks it on every chart and sparkline, across tabs, refreshes and period changes, and slow logs narrow to that moment ±1 bucket ("Whole range" shows everything again; × in the header or Esc clears the pin)
+- Built-in default — with no `views` configured, one page shows HTTP, queue, database and system panels, every custom metric, and the slow log
 
 ### Authorization
 
@@ -164,75 +162,89 @@ Gate::define('viewMetrics', function ($user = null) {
 
 ### Dashboard Views
 
-When your application has many custom metrics, you can organize the dashboard into multiple tabbed pages using the `views` config. Each view has a label and an array of sections.
-
-When `views` is empty (default), the dashboard shows a single page with all built-in panels, custom metric cards, and slow logs.
+Organise the dashboard into tabbed pages with the `views` config. Each view has a `label` and a list of `sections`. When `views` is empty (default), a single page shows the built-in panels, every custom metric as a tile, and the slow log.
 
 ```php
-// config/metrics.php → dashboard.views
+// config/metrics.php → dashboard
+'periods'        => [15 => '15m', 60 => '1h', 360 => '6h', 1440 => '24h', 10080 => '7d'],
+'default_period' => 60,
+'refresh'        => 30,                 // seconds, 0 = off
+'names'          => ['payment' => 'Payment gateway'],
+'status'         => [                   // header pill
+    ['label' => 'Error rate', 'value' => 'error_rate', 'warn' => '> 1', 'error' => '> 5'],
+],
 'views' => [
     [
         'label' => 'Overview',
         'sections' => [
-            ['type' => 'built-in'],
-            ['type' => 'cards', 'label' => 'Business', 'keys' => ['active_users', 'orders_total', 'revenue_usd']],
-            ['type' => 'slow-logs'],
-        ],
-    ],
-    [
-        'label' => 'External APIs',
-        'sections' => [
-            ['type' => 'cards', 'label' => 'Payment Gateway', 'keys' => ['payment_api_*']],
-            ['type' => 'chart', 'label' => 'Payment Calls', 'keys' => ['payment_api_calls', 'payment_api_errors'],
-                'labels' => ['payment_api_calls' => 'Calls', 'payment_api_errors' => 'Errors'],
-                'colors' => ['payment_api_errors' => 'red', 'payment_api_calls' => 'blue']],
-        ],
-    ],
-    [
-        'label' => 'Infrastructure',
-        'sections' => [
-            ['type' => 'cards', 'label' => 'Resources', 'keys' => ['cpu_usage_*', 'memory_*']],
-            ['type' => 'chart', 'label' => 'CPU & Memory', 'keys' => ['cpu_usage_percent', 'memory_usage_percent'],
-                'labels' => ['cpu_usage_percent' => 'CPU', 'memory_usage_percent' => 'Memory'],
-                'chart_type' => 'line', 'gauge' => true, 'format' => ['suffix' => '%']],
+            ['type' => 'stats', 'items' => [
+                ['label' => 'Requests', 'value' => 'http_requests_total', 'sub' => '{http_requests_5xx} errors', 'spark' => true],
+                ['label' => 'Avg response', 'value' => 'http_avg_duration', 'sub' => 'max {http_max_duration}', 'spark' => true,
+                    'status' => ['warn' => '> 500', 'error' => '> 2000', 'ok' => false]],
+                ['label' => 'Error rate', 'value' => 'error_rate', 'status' => ['warn' => '> 1', 'error' => '> 5']],
+            ]],
+            ['type' => 'panel', 'title' => 'Payments', 'caption' => 'calls / min', 'blocks' => [
+                ['chart' => ['series' => ['payment_api_calls'],
+                    'highlight' => ['value' => 'payment_api_errors', 'when' => '> 0', 'label' => 'has errors']]],
+                ['stats' => [
+                    ['label' => 'Avg', 'value' => 'payment_api_avg_ms'],
+                    ['label' => 'Errors', 'value' => 'payment_api_errors', 'status' => ['warn' => '> 0', 'ok' => false]],
+                ]],
+            ]],
+            ['type' => 'panel', 'title' => 'Containers', 'blocks' => [
+                ['table' => [
+                    'rows_from' => 'container_*_memory_mb', 'sort' => 'desc',
+                    'columns' => [
+                        ['label' => 'Container', 'text' => '$'],
+                        ['label' => 'Memory', 'value' => 'container_$_memory_mb'],
+                        ['label' => '', 'bar' => 'container_$_memory_mb', 'max' => 'container_$_memory_limit_mb'],
+                    ],
+                ]],
+            ]],
+            ['type' => 'slow-logs', 'title' => 'Slow log', 'limit' => 10],
         ],
     ],
 ],
 ```
 
+#### Values, templates and status rules
+
+| Concept | Syntax |
+|---------|--------|
+| Metric key | `http_requests_total` (built-in summary fields first, then custom metrics). Built-ins also include `queue_depth` (high + default + low) and `error_rate`. |
+| Charts and sparklines | Read the timeline, which has every custom metric plus these built-ins: `http_requests_total`, `http_avg_duration`, `http_max_duration`, `http_requests_5xx`, `http_slow_requests`, `error_rate`, `queue_depth` (and `_high` / `_default` / `_low`), `db_queries_total`, `db_slow_queries`, `cpu_load`, `redis_memory_mb`, `redis_ops_per_sec`. Pattern functions and `rows_from` match custom metrics only. |
+| Expression | `+ - * /` and parentheses: `payment_api_errors / payment_api_calls * 100`. Keys may contain `-`, so put spaces around a minus. Division by zero gives 0 when the numerator is 0, otherwise no value. |
+| Pattern functions | `sum()`, `avg()`, `min()`, `max()`, `count()` over keys matching a `*` pattern; `argmax(*_api_max_ms)` returns the name of the largest; `breakdown(*_api_errors)` lists non-zero ones (`Payments 2 · Search 1`). Names come from the `names` map. |
+| Template | Text fields (`sub`, `caption`, `text`, `note`, chart `title`) accept `{expr}` and `{expr\|format}`, plus `{period}` (selected range label) and `{max}` (chart scale top). |
+| Formats | `num` (15.6K), `int`, `dec`, `ms`, `pct`, `ratio` (×100 %), `mb`, `gb`, `mb_as_gb`, `mbps`, `short` (text before the first dot), or `['suffix' => '%', 'decimals' => 1, 'multiply' => 1]`. Without one, the format follows the key name (`_ms`, `_percent`, `_mb`, …). |
+| Status rule | `['warn' => '> 0', 'error' => '>= 50', 'value' => 'other_key', 'ok' => false]`. Operators: `< <= > >= == !=`. `value` evaluates another metric; `'ok' => false` keeps healthy values neutral instead of lime. |
+| Row placeholder | In `rows_from` tables and meters, `$` is the part matched by `*`: the raw key part inside `{…}` and value expressions, the display name in plain text. |
+
 #### Section Types
 
-| Type | Description |
-|------|-------------|
-| `built-in` | Built-in card group. Set `'id'` to show only one: `'http'`, `'queue'`, `'database'`, `'system'`. Omit `id` for all four + timeline charts. |
-| `cards` | Summary cards for custom metric keys matching `'keys'` patterns. Supports `value_colors` for threshold-based coloring. |
-| `list` | Ranked list pairing `label_keys` with `value_keys` patterns (e.g. top N items). |
-| `chart` | Chart panel for custom metric keys. Consecutive charts are grouped in a 3-column grid. |
-| `slow-logs` | The slow logs table with type filters, sort buttons, and pagination. |
+| Type | Options |
+|------|---------|
+| `stats` | `items` — list of items (`label`, `value` or `text`, `format`, `sub`, `spark` (`true` or a series expression), `status`). Or `keys` — patterns for one tile per matching custom metric. `label` adds a heading. |
+| `panel` | `title`, `caption`, `status` (marker next to the title), `wide` (span the full row), and either `blocks`, `columns` (list of block lists, side by side) or `figure` (one big value). Consecutive panels share a responsive grid. |
+| `slow-logs` | `title`, `caption`, `log_type` (`request` / `query`), `route` (pattern on the route URI, e.g. `api/checkout/*`), `controls` (type/sort buttons and pagination, default `true`), `limit` (rows per page). |
+| `built-in` | Built-in tiles and panels. Set `'id'` to show only one tile group: `'http'`, `'queue'`, `'database'`, `'system'`. |
+| `cards`, `list`, `chart`, `all-custom-cards` | Original section types, still rendered with the current components: `cards` → `stats` with `keys`, `list` → panel with `ranked`, `chart` → panel with a chart over `keys` patterns (`labels`, `labels_from`, `colors`, `chart_type`, `format`, `value_colors`). |
 
-#### Chart/Card Options
+#### Panel Blocks
 
-| Option | Description |
-|--------|-------------|
-| `label` | Section title displayed above cards or as chart title. |
-| `keys` | Array of metric key names. Supports `*` wildcard anywhere (e.g. `payment_*_calls`, `*_errors`). |
-| `labels` | Keyed map of short display names: `['payment_api_calls' => 'Calls']`. |
-| `labels_from` | Dynamic labels from custom summary: `['metric_count_key' => 'metric_label_key']`. |
-| `colors` | Indexed array `['blue', 'red']` or keyed map `['errors' => 'red']`. Available: blue, red, green, yellow, purple, cyan, orange, pink. |
-| `chart_type` | `'bar'` (default) or `'line'`. |
-| `gauge` | `true` to use latest value instead of sum for aggregation. |
-| `format` | `['suffix' => '%', 'decimals' => 1]` — value formatting for tooltips and Y-axis. |
-| `value_colors` | Card color rules: `[['key' => '*avg*', 'conditions' => [['op' => '<', 'value' => 150, 'color' => 'green']]]]`. |
+| Block | Options |
+|-------|---------|
+| `chart` | `series` — keys/expressions or `['value', 'label', 'color', 'type']`; `type` `bar` (default; several bar series are grouped), `line` or `stacked`; `height` (px); `highlight` — `['value', 'when', 'label']` paints bars orange where the condition holds; `title`; `legend` (`'top'`, `false`); `legend_note`; `values` (current value in the legend); `axis` (y-axis labels); `format`; `ticks` (x labels). Colours: `lime`, `white`, `blue`, `gray`, `orange`, `red`, `purple`, `cyan`, `pink`, `yellow`, `bar` or a hex value. |
+| `stats` | List of items in one row, or `['columns' => 2, 'items' => […]]`. |
+| `rows` | Key/value list of items. |
+| `meters` | `items` (`label`, `value`, `max` — default 100) or `rows_from` + `value`, `max`, `detail`; `layout` `inline` or `stacked`; `sort`, `limit`. |
+| `table` | `columns` (`label`, `value` / `text` / `bar` + `max`, `width`, `align`, `status`), rows from `rows_from` (pattern) or `rows` (fixed list of names), `order`, `sort`, `limit`, `spark` and `note` / `notes` (per row name) under each row, `divider`. |
+| `ranked` | `label_keys` + `value_keys` patterns paired by the `*` part (e.g. `top*_domain` with `top*_count`), `max` (default 5), `layout` `stacked` or `compact`. |
+| `trends` | Same pairing over the timeline: one mini bar chart per label on a shared scale, ranked by total. Needs the label metrics to be strings. |
+| `hero` | One large value with a `caption`. |
+| `note` | Muted text template; `['text' => …, 'divider' => true]` adds a rule above. |
 
-#### List Section Options
-
-| Option | Description |
-|--------|-------------|
-| `label_keys` | Patterns matching keys that hold display labels (e.g. `['top*_domain']`). |
-| `value_keys` | Patterns matching keys that hold numeric values (e.g. `['top*_count']`). |
-| `max` | Maximum number of items to display (default: 5). |
-
-The same metric key can appear in multiple views. Tabs persist across page refreshes (via localStorage) and are linkable via URL hash (e.g. `#infrastructure`).
+Tabs persist across page refreshes (via localStorage) and are linkable via URL hash (e.g. `#infrastructure`). The selected period is remembered too.
 
 ## JSON API
 

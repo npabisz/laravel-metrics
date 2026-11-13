@@ -179,55 +179,61 @@ return [
         'enabled' => env('METRICS_DASHBOARD_ENABLED', true),
         'path'    => env('METRICS_DASHBOARD_PATH', 'metrics'),
 
+        // Time range buttons, minutes => label. Ranges over 48h read the
+        // hourly rollups, e.g. add 10080 => '7d' or 43200 => '30d'.
+        'periods'        => [15 => '15m', 60 => '1h', 360 => '6h', 1440 => '24h'],
+        'default_period' => 60,
+
+        // Auto-refresh interval in seconds (0 disables it).
+        'refresh' => 30,
+
+        // Rules behind the status pill in the header ("All systems OK").
+        'status' => [
+            ['label' => 'Error rate', 'value' => 'error_rate', 'warn' => '> 1', 'error' => '> 5'],
+            ['label' => 'Queue depth', 'value' => 'queue_depth_default', 'warn' => '> 100'],
+        ],
+
+        // Display names for the part a '*' pattern matched (table rows,
+        // breakdown(), argmax()), e.g. ['payment' => 'Payments'].
+        'names' => [],
+
         /*
         |----------------------------------------------------------------------
         | Views (Tabbed Dashboard Pages)
         |----------------------------------------------------------------------
-        | Organize the dashboard into multiple tabs/pages. Each view has a
-        | label and an array of sections that control what is displayed.
-        |
-        | When empty (default), the dashboard shows a single page with all
-        | built-in panels, slow logs, and all custom metrics as cards.
+        | Each view has a label and a list of sections. When empty (default),
+        | a single page shows the built-in panels, every custom metric as a
+        | tile, and the slow log. See README "Dashboard Views" for every option.
         |
         | Section types:
-        |   'built-in'  — renders built-in card group: 'http', 'queue',
-        |                  'database', 'system' (all four if 'id' omitted)
-        |   'cards'     — summary cards for matching custom metric keys
-        |   'list'      — ranked list pairing label_keys with value_keys
-        |                  (e.g. top N domains by count)
-        |   'chart'     — a chart panel for matching custom metric keys
-        |   'slow-logs' — the slow logs table with filters and pagination
+        |   'stats'     — KPI strip: 'items' (or 'keys' patterns for one tile
+        |                  per matching custom metric)
+        |   'panel'     — card with 'title', 'caption' and 'blocks' (chart,
+        |                  stats, rows, meters, table, ranked, trends, hero,
+        |                  note); 'columns' for a side-by-side layout, 'figure'
+        |                  for a single big number, 'wide' to span the row
+        |   'slow-logs' — slow requests/queries; 'log_type', 'route' pattern,
+        |                  'controls', 'limit'
+        |   'built-in', 'cards', 'list', 'chart', 'all-custom-cards' — the
+        |                  original types, still supported
         |
-        | Chart/card options:
-        |   'label'      — section title
-        |   'keys'       — metric keys to include, supports '*' wildcard
-        |   'colors'     — indexed array or keyed map (blue, red, green,
-        |                   yellow, purple, cyan, orange, pink)
-        |   'chart_type' — 'bar' (default) or 'line'
-        |   'gauge'      — true to use latest value instead of sum
-        |   'format'     — ['suffix' => '%', 'decimals' => 1, 'multiply' => 1]
+        | Values are metric keys (built-in summary fields first, then custom
+        | metrics) or expressions: 'a / b * 100', 'sum(container_*_mb)'.
+        | Text fields take placeholders: '{key}', '{key|ms}', '{period}'.
         |
         | Example:
         |   [
         |       'label' => 'Overview',
         |       'sections' => [
-        |           ['type' => 'built-in'],
-        |           ['type' => 'cards', 'label' => 'Key Metrics', 'keys' => ['active_users', 'orders_total']],
+        |           ['type' => 'stats', 'items' => [
+        |               ['label' => 'Requests', 'value' => 'http_requests_total', 'sub' => '{http_requests_5xx} errors', 'spark' => true],
+        |               ['label' => 'Error rate', 'value' => 'error_rate', 'status' => ['warn' => '> 1', 'error' => '> 5']],
+        |           ]],
+        |           ['type' => 'panel', 'title' => 'Payments', 'caption' => 'calls / min', 'blocks' => [
+        |               ['chart' => ['series' => ['payment_api_calls'], 'highlight' => ['value' => 'payment_api_errors', 'when' => '> 0', 'label' => 'has errors']]],
+        |               ['stats' => [['label' => 'Avg', 'value' => 'payment_api_avg_ms'], ['label' => 'Errors', 'value' => 'payment_api_errors']]],
+        |           ]],
         |           ['type' => 'slow-logs'],
-        |       ],
-        |   ],
-        |   [
-        |       'label' => 'External APIs',
-        |       'sections' => [
-        |           ['type' => 'cards', 'label' => 'Payment Gateway', 'keys' => ['payment_api_*']],
-        |           ['type' => 'chart', 'label' => 'API Calls', 'keys' => ['payment_api_calls', 'payment_api_errors'], 'colors' => ['blue', 'red']],
-        |       ],
-        |   ],
-        |   [
-        |       'label' => 'Infrastructure',
-        |       'sections' => [
-        |           ['type' => 'cards', 'label' => 'Resources', 'keys' => ['cpu_usage_*', 'memory_*']],
-        |           ['type' => 'chart', 'label' => 'CPU Usage', 'keys' => ['cpu_usage_percent'], 'chart_type' => 'line', 'gauge' => true, 'format' => ['suffix' => '%']],
         |       ],
         |   ],
         */

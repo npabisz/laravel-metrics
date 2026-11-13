@@ -5,6 +5,7 @@ namespace Npabisz\LaravelMetrics\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Carbon;
 use Npabisz\LaravelMetrics\Models\Metric;
 use Npabisz\LaravelMetrics\Models\MetricHourly;
 use Npabisz\LaravelMetrics\Models\SlowLog;
@@ -12,36 +13,69 @@ use Npabisz\LaravelMetrics\Services\MetricAggregator;
 
 class DashboardController extends Controller
 {
+    protected const MAX_MINUTES = 43200; // 30 days
+
+    protected const DEFAULT_PERIODS = [15 => '15m', 60 => '1h', 360 => '6h', 1440 => '24h'];
+
+    protected const DEFAULT_STATUS_RULES = [
+        ['label' => 'Error rate', 'value' => 'error_rate', 'warn' => '> 1', 'error' => '> 5'],
+        ['label' => 'Queue depth', 'value' => 'queue_depth_default', 'warn' => '> 100'],
+    ];
+
     public function index()
     {
-        $views = config('metrics.dashboard.views', []);
+        $dashboard = config('metrics.dashboard', []);
+        $periods = $this->periods($dashboard['periods'] ?? null);
+        $defaultPeriod = (int) ($dashboard['default_period'] ?? 60);
 
-        $metricConfigs = [];
-        foreach ($views as $view) {
-            foreach ($view['sections'] ?? [] as $section) {
-                if (!empty($section['keys'])) {
-                    $metricConfigs[] = [
-                        'label'  => $section['label'] ?? '',
-                        'keys'   => $section['keys'],
-                        'colors' => $section['colors'] ?? null,
-                        'type'   => $section['chart_type'] ?? null,
-                        'gauge'  => $section['gauge'] ?? false,
-                        'format' => $section['format'] ?? null,
-                    ];
-                }
-            }
+        if (!in_array($defaultPeriod, array_column($periods, 'minutes'), true)) {
+            $defaultPeriod = $periods[0]['minutes'];
         }
 
         return view('metrics::dashboard', [
-            'views'        => $views,
-            'metricConfigs' => $metricConfigs,
+            'basePath' => trim((string) ($dashboard['path'] ?? 'metrics'), '/'),
+            'settings' => [
+                'views'         => $dashboard['views'] ?? [],
+                'periods'       => $periods,
+                'defaultPeriod' => $defaultPeriod,
+                'refresh'       => max((int) ($dashboard['refresh'] ?? 30), 0),
+                'status'        => $dashboard['status'] ?? self::DEFAULT_STATUS_RULES,
+                'names'         => $dashboard['names'] ?? [],
+            ],
         ]);
+    }
+
+    /**
+     * Normalize the configured period map (minutes => label) into an ordered list.
+     *
+     * @return array<int, array{minutes: int, label: string}>
+     */
+    protected function periods(?array $configured): array
+    {
+        $periods = [];
+
+        foreach ($configured ?: self::DEFAULT_PERIODS as $minutes => $label) {
+            $minutes = (int) $minutes;
+
+            if ($minutes < 1 || $minutes > self::MAX_MINUTES) {
+                continue;
+            }
+
+            $periods[] = ['minutes' => $minutes, 'label' => (string) $label];
+        }
+
+        if ($periods === []) {
+            return $this->periods(self::DEFAULT_PERIODS);
+        }
+
+        usort($periods, fn ($a, $b) => $a['minutes'] <=> $b['minutes']);
+
+        return $periods;
     }
 
     public function apiData(Request $request): JsonResponse
     {
-        $minutes = (int) $request->input('minutes', 60);
-        $minutes = min($minutes, 43200); // max 30 days
+        $minutes = $this->minutes($request);
         $since = now()->subMinutes($minutes);
 
         // Pick resolution: raw (<2h), 5-min grouped (2-48h), hourly (>48h)
@@ -67,7 +101,7 @@ class DashboardController extends Controller
     /**
      * Raw or grouped response from metrics.
      */
-    protected function buildResponse($metrics, int $minutes, string $timeFormat, bool $isGrouped = false): JsonResponse
+    protected function buildResponse($metrics, int $minutes, string $timeFormat, int $bucketSeconds = 60): JsonResponse
     {
         $latest = $metrics->last();
         $totalRequests = $metrics->sum('http_requests_total');
@@ -77,6 +111,7 @@ class DashboardController extends Controller
             'status'  => 'ok',
             'period'  => $minutes,
             'samples' => $metrics->count(),
+            'bucket'  => $bucketSeconds, // seconds per timeline row
             'summary' => [
                 'http_requests_total' => $totalRequests,
                 'http_requests_2xx'   => $metrics->sum('http_requests_2xx'),
@@ -107,10 +142,12 @@ class DashboardController extends Controller
             'timeline' => $metrics->map(function ($m) use ($timeFormat) {
                 $row = [
                     'time'             => $m->recorded_at->format($timeFormat),
+                    'ts'               => $m->recorded_at->getTimestamp(),
                     'requests'         => $m->http_requests_total,
                     'avg_duration'     => round($m->http_avg_duration_ms, 1),
                     'max_duration'     => round($m->http_max_duration_ms, 1),
                     'errors_5xx'       => $m->http_requests_5xx,
+                    'http_slow'        => $m->http_slow_requests,
                     'queue_high'       => $m->queue_depth_high,
                     'queue_default'    => $m->queue_depth_default,
                     'queue_low'        => $m->queue_depth_low,
@@ -121,9 +158,11 @@ class DashboardController extends Controller
                     'redis_ops'        => $m->redis_ops_per_sec,
                 ];
 
+                // Strings are kept too, so label metrics (e.g. top-N names)
+                // can be paired with their counts minute by minute.
                 if (is_array($m->custom)) {
                     foreach ($m->custom as $key => $value) {
-                        if (is_numeric($value)) {
+                        if (is_numeric($value) || is_string($value)) {
                             $row['c:' . $key] = $value;
                         }
                     }
@@ -185,7 +224,7 @@ class DashboardController extends Controller
             return $obj;
         })->values();
 
-        return $this->buildResponse($buckets, $minutes, $timeFormat);
+        return $this->buildResponse($buckets, $minutes, $timeFormat, $bucketMinutes * 60);
     }
 
     /**
@@ -203,7 +242,7 @@ class DashboardController extends Controller
 
         $timeFormat = $minutes > 1440 ? 'M d H:i' : 'H:i';
 
-        return $this->buildResponse($metrics, $minutes, $timeFormat);
+        return $this->buildResponse($metrics, $minutes, $timeFormat, 3600);
     }
 
     protected function aggregateCustomMetrics($metrics): array
@@ -215,28 +254,39 @@ class DashboardController extends Controller
 
     public function apiSlowLogs(Request $request): JsonResponse
     {
-        $minutes = (int) $request->input('minutes', 60);
-        $minutes = min($minutes, 43200);
+        [$since, $until] = $this->slowLogWindow($request);
         $type = $request->input('type');
-        $perPage = min((int) $request->input('per_page', 25), 100);
+        $route = $request->input('route');
+        $perPage = max(min((int) $request->input('per_page', 25), 100), 1);
         $page = max((int) $request->input('page', 1), 1);
         $sort = $request->input('sort', 'duration');
 
-        $query = SlowLog::where('recorded_at', '>=', now()->subMinutes($minutes));
+        $query = SlowLog::where('recorded_at', '>=', $since);
 
-        if ($type) {
+        if ($until !== null) {
+            $query->where('recorded_at', '<=', $until);
+        }
+
+        if (is_string($type) && $type !== '') {
             $query->where('type', $type);
         }
+
+        if (is_string($route) && $route !== '') {
+            // Explicit ESCAPE: SQLite has no default escape character.
+            $column = $query->getQuery()->getGrammar()->wrap('route');
+            $query->whereRaw("{$column} like ? escape '!'", [$this->likePattern($route)]);
+        }
+
+        // Count before ordering: PostgreSQL rejects ORDER BY next to an aggregate.
+        $total = $query->count();
+        $lastPage = max((int) ceil($total / $perPage), 1);
+        $page = min($page, $lastPage);
 
         if ($sort === 'time') {
             $query->orderBy('recorded_at', 'desc');
         } else {
             $query->orderBy('duration_ms', 'desc');
         }
-
-        $total = $query->count();
-        $lastPage = max((int) ceil($total / $perPage), 1);
-        $page = min($page, $lastPage);
 
         $logs = $query->offset(($page - 1) * $perPage)
             ->limit($perPage)
@@ -262,5 +312,44 @@ class DashboardController extends Controller
             'total' => $total,
             'last_page' => $lastPage,
         ]);
+    }
+
+    protected function minutes(Request $request): int
+    {
+        return max(min((int) $request->input('minutes', 60), self::MAX_MINUTES), 1);
+    }
+
+    /**
+     * Time window for slow logs: 'from'/'to' (unix seconds, e.g. around a
+     * pinned chart point) when both are given, otherwise the last N minutes.
+     *
+     * @return array{0: Carbon, 1: Carbon|null}
+     */
+    protected function slowLogWindow(Request $request): array
+    {
+        $from = $request->input('from');
+        $to = $request->input('to');
+        $earliest = now()->subMinutes(self::MAX_MINUTES);
+
+        if (is_numeric($from) && is_numeric($to) && (int) $from <= (int) $to) {
+            // Explicit zone: Carbon 3 creates timestamps in UTC, while
+            // recorded_at is stored as app-timezone wall-clock time.
+            $zone = config('app.timezone');
+            $since = Carbon::createFromTimestamp((int) $from, $zone);
+
+            return [$since->lt($earliest) ? $earliest : $since, Carbon::createFromTimestamp((int) $to, $zone)];
+        }
+
+        return [now()->subMinutes($this->minutes($request)), null];
+    }
+
+    /**
+     * Turn a '*' wildcard pattern into a LIKE pattern escaped with '!'.
+     */
+    protected function likePattern(string $pattern): string
+    {
+        $escaped = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $pattern);
+
+        return str_replace('*', '%', $escaped);
     }
 }
