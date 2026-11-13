@@ -113,6 +113,64 @@ By default, request tracking is registered as global middleware. To limit it to 
 
 Set `track_requests` to `false` and apply `RequestMonitor::class` middleware manually for full control.
 
+### Slow Queries
+
+Queries slower than `slow_query_threshold` (ms) are logged to `metrics_slow_logs`. When the log shares the application's database connection (no `METRICS_DB_CONNECTION`), a row cannot always be inserted while the query event is being handled: right after an `INSERT` or `REPLACE`, Laravel reads that statement's insert ID once the event is over and would get the log row's instead, and inside a transaction the row would be rolled back with it. Such queries are kept in memory and written at the next slow query that can be written at once, or when the request, queue job (also one that timed out) or console command ends, or when the process shuts down. At most 100 rows and about 1 MB of SQL and bindings wait at a time; more are counted (`db_slow_queries`) but not logged, and what a process killed from outside held is lost. With a connection of its own the log is always written at once.
+
+### Request Trace
+
+While a request runs, what it spends its time on is kept in memory. When the request turns out slower than its threshold, the slow log entry gets it in `context.trace`; for any other request it is dropped, at no cost beyond a few array writes per query. Slow queries logged during the request carry the same `context.trace_id`.
+
+Database queries are traced on their own: their count and total time, and the costliest statements (lists of placeholders such as `in (?, ?, ?)` counted as one statement). Anything else is measured by the application:
+
+```php
+use Npabisz\LaravelMetrics\Trace\RequestTrace;
+
+$trace = app(RequestTrace::class);
+
+// Time a piece of work; spans measured inside it are one level deeper.
+$quote = $trace->measure('pricing', fn () => $pricing->quote($cart));
+
+// Record work that times itself already, right after it finished.
+$trace->record('payment_api', $durationMs, ['status' => 200]);
+
+// Note a moment, or describe the whole request.
+$trace->mark('cache miss');
+$trace->tag('plan', 'premium');
+```
+
+Outside a traced request - queue jobs, console commands - every call does nothing, and `measure()` just runs the callback. Under Octane one trace serves the worker's requests one after another.
+
+A stored trace looks like this:
+
+```json
+{
+  "total_ms": 683.2,
+  "before_ms": 4.1,
+  "unaccounted_ms": 41.2,
+  "spans": [
+    {"name": "pricing", "at": 12.3, "ms": 530.4, "depth": 0},
+    {"name": "payment_api", "at": 14.0, "ms": 412.8, "depth": 1, "meta": {"status": 200}}
+  ],
+  "db": {"count": 23, "ms": 141.7, "distinct": 9, "top": [{"sql": "select * from `items` where `id` in (?, …)", "count": 1, "ms": 118.4, "max_ms": 118.4}]},
+  "marks": [{"at": 12.0, "msg": "cache miss"}],
+  "tags": {"plan": "premium"}
+}
+```
+
+- `at` is when a span began and `ms` how long it took, both in milliseconds from the start of the trace (when the request reached the middleware).
+- `before_ms` is the time between PHP taking the request (`REQUEST_TIME_FLOAT`) and the middleware: framework boot, Octane's preparation, global middleware registered before this one. Under FrankenPHP's worker mode `REQUEST_TIME_FLOAT` is set when a worker thread takes the request, so time spent waiting for a free thread is not included.
+- `unaccounted_ms` is the time no query and no innermost span covers. A span with spans inside it explains only what they explain, so its own work between them counts as unaccounted. The time between two queries is not database time. Above 1000 spans or queries it is an upper bound, marked `approximate`.
+- `max_spans` and `max_marks` cap what is kept; spans over the cap are summed up by name in `spans_dropped`. A trace over `max_bytes` gives up detail step by step (span meta and marks, then spans, then SQL text) and is marked `truncated`.
+
+| Option | Env | Default |
+|---|---|---|
+| `trace.enabled` | `METRICS_TRACE` | `true` |
+| `trace.max_spans` | | 50 |
+| `trace.max_marks` | | 50 |
+| `trace.top_queries` | | 5 |
+| `trace.max_bytes` | | 16384 |
+
 ### Custom Metric Aggregation
 
 Define how custom metrics are aggregated for hourly rollups and dashboard summaries:
@@ -481,7 +539,7 @@ One row per hour. Pre-aggregated from `metrics` by the `monitoring:aggregate-hou
 
 ### `metrics_slow_logs`
 
-One row per slow query or slow request. Stores SQL/URL, duration, user_id, context. Auto-cleaned after 14 days (configurable).
+One row per slow query or slow request. Stores SQL/URL, duration, user_id, context. A slow request's context holds its trace (`trace`, see [Request Trace](#request-trace)) and `trace_id`, which slow queries logged during that request share. Auto-cleaned after 14 days (configurable).
 
 All tables support a separate database connection via `METRICS_DB_CONNECTION`.
 

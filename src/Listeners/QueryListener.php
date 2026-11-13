@@ -38,15 +38,42 @@ class QueryListener
         if ($event->time > $threshold) {
             $this->metrics->increment('db', 'slow_queries');
 
-            $this->metrics->logSlowQuery(
+            $arguments = [
                 $event->sql,
                 $event->bindings,
                 $event->time,
                 $event->connectionName,
                 // Links the query to the request it ran in, should that
                 // request be logged too.
-                $this->trace->isActive() ? ['trace_id' => $this->trace->id()] : null
-            );
+                $this->trace->isActive() ? ['trace_id' => $this->trace->id()] : null,
+            ];
+
+            if ($this->canWriteNow($event)) {
+                $this->metrics->logSlowQuery(...$arguments);
+            } else {
+                $this->metrics->deferSlowQuery(...$arguments);
+            }
         }
+    }
+
+    /**
+     * Whether the slow log row can be inserted while this event is handled.
+     * On the query's own connection it cannot right after an INSERT or
+     * REPLACE - Laravel reads that statement's insert ID once the event has
+     * been handled, and would get the log row's - or inside a transaction,
+     * whose rollback would take the row with it. Only statements known not
+     * to insert are written at once; anything else waits.
+     */
+    protected function canWriteNow(QueryExecuted $event): bool
+    {
+        if ($event->connectionName !== $this->metrics->slowLogConnection()) {
+            return true;
+        }
+
+        if ($event->connection->transactionLevel() > 0) {
+            return false;
+        }
+
+        return preg_match('/^\s*(select|update|delete)\b/i', $event->sql) === 1;
     }
 }

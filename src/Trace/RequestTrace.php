@@ -12,14 +12,18 @@ namespace Npabisz\LaravelMetrics\Trace;
  * long-running process collects nothing. One instance serves all requests of
  * a process, one after another: start() clears what the previous one left.
  *
- * Times are milliseconds from the start of the trace.
+ * Times are milliseconds from the start of the trace. unaccounted_ms is the
+ * part of it no query and no innermost span covers: a span with spans inside
+ * it explains only what those explain, so the time it spends on its own -
+ * PHP work between the calls it makes - shows up as unaccounted.
  */
 class RequestTrace
 {
-    /** Queries closer together than this (ms) count as one stretch of database time. */
-    protected const QUERY_MERGE_GAP_MS = 1.0;
-
-    /** Intervals kept for working out how much of the request is accounted for. */
+    /**
+     * Intervals of spans and of queries kept for working out how much of the
+     * request is accounted for; past that unaccounted_ms is an upper bound,
+     * marked 'approximate'.
+     */
     protected const MAX_INTERVALS = 1000;
 
     /** Distinct SQL statements kept apart; the rest add up under OTHER_STATEMENTS. */
@@ -27,7 +31,7 @@ class RequestTrace
 
     protected const OTHER_STATEMENTS = '(other statements)';
 
-    /** A REQUEST_TIME_FLOAT further back than this is not this request's arrival. */
+    /** A REQUEST_TIME_FLOAT further back than this belongs to the process, not to this request. */
     protected const MAX_BEFORE_MS = 60000;
 
     protected const MAX_NAME_LENGTH = 100;
@@ -49,8 +53,11 @@ class RequestTrace
     /** @var array<string, array{count: int, ms: float}> spans over the limit, by name */
     protected array $droppedSpans = [];
 
-    /** @var list<array{0: float, 1: float}> start and end of every span */
+    /** @var list<array{0: float, 1: float}> start and end of every span with no spans inside */
     protected array $spanIntervals = [];
+
+    /** @var array<int, bool> by depth: whether the span open at that depth has had a span inside */
+    protected array $hasInner = [];
 
     /** @var list<array{at: float, msg: string}> */
     protected array $marks = [];
@@ -65,7 +72,7 @@ class RequestTrace
     /** @var array<string, array{count: int, ms: float, max: float}> by statement */
     protected array $statements = [];
 
-    /** @var list<array{0: float, 1: float}> stretches of database time, in order */
+    /** @var list<array{0: float, 1: float}> start and end of every query, in order */
     protected array $queryIntervals = [];
 
     /** Set once an interval list hit MAX_INTERVALS and unaccounted_ms became an estimate. */
@@ -96,8 +103,11 @@ class RequestTrace
      * Begin a trace, dropping whatever the previous one left.
      *
      * @param float|null $startedAt   microtime(true) the trace counts from, now by default
-     * @param float|null $requestTime when the server received the request
-     *                                (REQUEST_TIME_FLOAT), for before_ms
+     * @param float|null $requestTime when PHP began handling the request
+     *                                (REQUEST_TIME_FLOAT), for before_ms. Under
+     *                                FrankenPHP's worker mode that is when a
+     *                                worker thread took the request: time spent
+     *                                waiting for a free thread is not in it.
      */
     public function start(?float $startedAt = null, ?float $requestTime = null): void
     {
@@ -158,6 +168,7 @@ class RequestTrace
 
         $id = $this->id;
         $depth = $this->depth++;
+        $this->hasInner[$depth] = false;
         $start = microtime(true);
         $failed = true;
 
@@ -170,7 +181,9 @@ class RequestTrace
             // The callback may have ended this trace or started another.
             if ($this->id === $id) {
                 $this->depth = $depth;
-                $this->addSpan($name, $start, microtime(true), $depth, $failed ? $meta + ['failed' => true] : $meta);
+                $isLeaf = !$this->hasInner[$depth];
+                unset($this->hasInner[$depth]);
+                $this->addSpan($name, $start, microtime(true), $depth, $failed ? $meta + ['failed' => true] : $meta, $isLeaf);
             }
         }
     }
@@ -188,8 +201,9 @@ class RequestTrace
         }
 
         $end = microtime(true);
+        $durationMs = is_finite($durationMs) ? max(0.0, $durationMs) : 0.0;
 
-        $this->addSpan($name, $end - max(0.0, $durationMs) / 1000, $end, $this->depth, $meta);
+        $this->addSpan($name, $end - $durationMs / 1000, $end, $this->depth, $meta);
     }
 
     /**
@@ -226,7 +240,7 @@ class RequestTrace
             return;
         }
 
-        $this->tags[$key] = is_string($value) ? $this->cut($value, static::MAX_STRING_LENGTH) : $value;
+        $this->tags[$key] = $this->cleanValue($value);
     }
 
     /**
@@ -238,6 +252,7 @@ class RequestTrace
             return;
         }
 
+        $durationMs = is_finite($durationMs) ? max(0.0, $durationMs) : 0.0;
         $end = $this->offset(microtime(true));
         $start = max(0.0, $end - $durationMs);
 
@@ -300,6 +315,7 @@ class RequestTrace
         $this->spans = [];
         $this->droppedSpans = [];
         $this->spanIntervals = [];
+        $this->hasInner = [];
         $this->marks = [];
         $this->droppedMarks = 0;
         $this->tags = [];
@@ -310,12 +326,18 @@ class RequestTrace
         $this->approximate = false;
     }
 
-    protected function addSpan(string $name, float $start, float $end, int $depth, array $meta): void
+    protected function addSpan(string $name, float $start, float $end, int $depth, array $meta, bool $isLeaf = true): void
     {
         $at = $this->offset($start);
         $ms = max(0.0, ($end - $start) * 1000);
 
-        if (count($this->spanIntervals) < static::MAX_INTERVALS) {
+        if ($depth > 0) {
+            $this->hasInner[$depth - 1] = true;
+        }
+
+        if (!$isLeaf) {
+            // Covered by what is inside it.
+        } elseif (count($this->spanIntervals) < static::MAX_INTERVALS) {
             $this->spanIntervals[] = [max(0.0, $at), $at + $ms];
         } else {
             $this->approximate = true;
@@ -340,22 +362,22 @@ class RequestTrace
     }
 
     /**
-     * Queries run one after another, so each new one either continues the
-     * last stretch of database time or starts a new one.
+     * Queries run one after another. Only one that overlaps the last (clock
+     * rounding) is merged with it: the PHP time between two queries is not
+     * database time.
      */
     protected function addQueryInterval(float $start, float $end): void
     {
         $last = array_key_last($this->queryIntervals);
 
-        if ($last !== null && $start - $this->queryIntervals[$last][1] <= static::QUERY_MERGE_GAP_MS) {
+        if ($last !== null && $start <= $this->queryIntervals[$last][1]) {
             $this->queryIntervals[$last][1] = max($this->queryIntervals[$last][1], $end);
 
             return;
         }
 
-        if ($last !== null && count($this->queryIntervals) >= static::MAX_INTERVALS) {
-            // Stretch the last one instead: the gap counts as covered.
-            $this->queryIntervals[$last][1] = max($this->queryIntervals[$last][1], $end);
+        if (count($this->queryIntervals) >= static::MAX_INTERVALS) {
+            // Left out: unaccounted_ms can only come out too high.
             $this->approximate = true;
 
             return;
@@ -451,8 +473,9 @@ class RequestTrace
     /**
      * Keep the stored trace within max_bytes, giving up detail step by step:
      * span meta and most marks, then most spans, then the SQL text, then
-     * everything but the totals. Strings that are not valid UTF-8 (SQL with
-     * binary literals, say) are repaired, so the context always encodes.
+     * everything but the totals. Measured as Eloquent will store it, with
+     * non-ASCII characters escaped. Strings that are not valid UTF-8 (SQL
+     * with binary literals, say) are repaired, so the context always encodes.
      */
     protected function fit(array $trace): array
     {
@@ -480,10 +503,15 @@ class RequestTrace
 
                 return $trace;
             },
-            fn (array $trace): array => array_diff_key($trace, array_flip(['spans', 'spans_dropped', 'marks', 'tags'])),
+            function (array $trace): array {
+                unset($trace['db']['top']);
+
+                return array_diff_key($trace, array_flip(['spans', 'spans_dropped', 'marks', 'tags']));
+            },
         ];
 
-        $encoded = json_encode($trace, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+        $flags = JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION;
+        $encoded = json_encode($trace, $flags);
 
         foreach ($steps as $step) {
             if ($encoded !== false && strlen($encoded) <= $this->maxBytes) {
@@ -492,7 +520,7 @@ class RequestTrace
 
             $trace = $step($trace);
             $trace['truncated'] = true;
-            $encoded = json_encode($trace, JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+            $encoded = json_encode($trace, $flags);
         }
 
         if ($encoded === false) {
@@ -523,14 +551,29 @@ class RequestTrace
         $clean = [];
 
         foreach (array_slice($meta, 0, static::MAX_META_KEYS, true) as $key => $value) {
-            if (is_string($value)) {
-                $clean[$key] = $this->cut($value, static::MAX_STRING_LENGTH);
-            } elseif (is_scalar($value) || $value === null) {
-                $clean[$key] = $value;
+            if (is_scalar($value) || $value === null) {
+                $clean[$key] = $this->cleanValue($value);
             }
         }
 
         return $clean;
+    }
+
+    /**
+     * A value as it can be stored: long strings cut, INF and NAN - which
+     * JSON cannot hold - dropped.
+     */
+    protected function cleanValue(string|int|float|bool|null $value): string|int|float|bool|null
+    {
+        if (is_string($value)) {
+            return $this->cut($value, static::MAX_STRING_LENGTH);
+        }
+
+        if (is_float($value) && !is_finite($value)) {
+            return null;
+        }
+
+        return $value;
     }
 
     protected function offset(float $microtime): float

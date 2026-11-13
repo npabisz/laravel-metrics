@@ -9,6 +9,8 @@ use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Queue\Events\JobProcessed;
+use Illuminate\Queue\Events\JobTimedOut;
+use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
@@ -34,6 +36,9 @@ class MetricsServiceProvider extends ServiceProvider
         $this->app->singleton(MetricsService::class);
         $this->app->singleton(MetricAggregator::class);
         $this->app->singleton(RequestTrace::class, fn () => RequestTrace::fromConfig((array) config('metrics.trace', [])));
+        // Resolved by the event dispatcher for every query; what it holds is
+        // shared by the whole process anyway (see resolveSharedServices()).
+        $this->app->singleton(QueryListener::class);
     }
 
     public function boot(): void
@@ -126,10 +131,7 @@ class MetricsServiceProvider extends ServiceProvider
     protected function resolveSharedServices(): void
     {
         $this->app->make(MetricsService::class);
-
-        if (config('metrics.trace.enabled', true)) {
-            $this->app->make(RequestTrace::class);
-        }
+        $this->app->make(RequestTrace::class);
     }
 
     protected function registerMiddleware(): void
@@ -180,10 +182,13 @@ class MetricsServiceProvider extends ServiceProvider
     }
 
     /**
-     * When the values recorded in batch mode go to Redis and logged slow
+     * When the values recorded in batch mode go to Redis and deferred slow
      * queries to the database: once the response has been sent (also for
      * each request of an Octane worker, which terminates every request),
-     * after each queue job, and after each console command.
+     * after each queue job and console command, when a job times out or a
+     * worker stops (a timed-out worker kills itself with SIGKILL, so no
+     * shutdown function runs there), and when the process shuts down, a
+     * fatal error included. What a process killed from outside held is lost.
      */
     protected function registerFlush(): void
     {
@@ -195,9 +200,15 @@ class MetricsServiceProvider extends ServiceProvider
         });
 
         Event::listen(
-            [JobProcessed::class, JobExceptionOccurred::class, JobFailed::class, CommandFinished::class],
+            [JobProcessed::class, JobExceptionOccurred::class, JobFailed::class, JobTimedOut::class, WorkerStopping::class, CommandFinished::class],
             fn () => static::flushIfResolved(app())
         );
+
+        // The application booted here: under Octane the one every request's
+        // copy shares MetricsService with.
+        $app = $this->app;
+
+        register_shutdown_function(static fn () => static::flushIfResolved($app));
     }
 
     protected static function flushIfResolved(Container $app): void
