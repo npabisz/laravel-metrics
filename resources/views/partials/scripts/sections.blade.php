@@ -129,19 +129,126 @@ function urlPath(url) {
     }
 }
 
-function slowLogRow(log, showType, template) {
+function slowLogSummary(log) {
+    return log.type === 'request'
+        ? `${log.method || ''} ${urlPath(log.url)}${log.status_code ? ' → ' + log.status_code : ''}`
+        : (log.sql || '');
+}
+
+// A row opens to show the entry in full (slowLogDetailHtml), loaded on demand.
+function slowLogRow(log, showType, template, panelId) {
     const isRequest = log.type === 'request';
-    const detail = isRequest
-        ? `${esc(log.method || '')} ${esc(urlPath(log.url))}${log.status_code ? ' → ' + esc(log.status_code) : ''}`
-        : esc(log.sql || '');
     const right = isRequest ? (log.user_id ?? '') : (log.connection ?? '');
-    return `<div class="log-row" style="${template}">
-        <div class="muted">${esc(log.time)}</div>
-        ${showType ? `<div class="muted">${esc(log.type)}</div>` : ''}
-        <div class="duration warn">${esc(formatValue(log.duration_ms, 'ms').replace(' ', ''))}</div>
-        <div class="detail" title="${isRequest ? esc(log.url || '') : esc(log.sql || '')}">${detail}</div>
-        <div class="muted" style="text-align:right">${esc(right)}</div>
+    return `<button type="button" class="log-row" style="${template}" data-log="${esc(log.id)}" aria-expanded="false" aria-controls="${panelId}-log-${esc(log.id)}">
+        <span class="muted">${esc(log.time)}</span>
+        ${showType ? `<span class="muted">${esc(log.type)}</span>` : ''}
+        <span class="duration warn">${esc(formatValue(log.duration_ms, 'ms').replace(' ', ''))}</span>
+        <span class="detail" title="${esc(isRequest ? log.url || '' : log.sql || '')}">${esc(slowLogSummary(log))}</span>
+        <span class="muted" style="text-align:right">${esc(right)}</span>
+    </button>
+    <div class="log-detail" id="${panelId}-log-${esc(log.id)}" hidden></div>`;
+}
+
+function msText(value) {
+    return isNum(value) ? formatValue(value, 'ms') : EMPTY;
+}
+
+function factsHtml(facts) {
+    const rows = facts.filter(([, value]) => value !== null && value !== undefined && value !== '');
+    return rows.length
+        ? `<dl class="facts">${rows.map(([label, value]) => `<dt>${esc(label)}</dt><dd>${esc(value)}</dd>`).join('')}</dl>`
+        : '';
+}
+
+function detailBlock(title, body, note = '') {
+    return body ? `<div class="detail-block"><div class="mini-head">${esc(title)}${note ? ` <span class="muted">· ${esc(note)}</span>` : ''}</div>${body}</div>` : '';
+}
+
+// Spans on a common time axis. A span with spans inside it is drawn grey:
+// only what is inside it is explained, its own time is not.
+function waterfallHtml(trace) {
+    const spans = trace.spans || [];
+    if (!spans.length) return '';
+    const total = Math.max(trace.total_ms || 0, ...spans.map(s => s.at + s.ms)) || 1;
+    const pct = v => Math.min(100, Math.max(0, v / total * 100));
+    const hasInner = (span, index) => spans.some((other, j) => j !== index && other.depth === span.depth + 1
+        && other.at >= span.at - 0.05 && other.at <= span.at + span.ms + 0.05);
+    const metaText = meta => Object.entries(meta || {}).map(([k, v]) => `${k}: ${v === true ? 'yes' : v}`).join(' · ');
+    return `<div class="wf">${spans.map((span, i) => {
+        const failed = span.meta && span.meta.failed !== undefined && span.meta.failed !== false;
+        const kind = failed ? ' error' : (hasInner(span, i) ? ' parent' : '');
+        const meta = metaText(span.meta);
+        return `<div class="wf-row">
+            <span class="wf-name" style="padding-left:${Math.min(span.depth, 6) * 14}px" title="${esc(span.name + (meta ? ' · ' + meta : ''))}">${esc(span.name)}${meta ? ` <span class="muted">${esc(meta)}</span>` : ''}</span>
+            <span class="wf-track"><span class="wf-bar${kind}" style="left:${pct(span.at)}%;width:${Math.max(pct(span.ms), 0.4)}%"></span></span>
+            <span class="wf-ms">${esc(msText(span.ms))}</span>
+        </div>`;
+    }).join('')}
+        <div class="wf-row wf-axis muted"><span></span><span class="wf-scale"><span>0</span><span>${esc(msText(total))}</span></span><span></span></div>
     </div>`;
+}
+
+function traceHtml(trace) {
+    if (!trace) return '';
+    const db = trace.db;
+    const unaccountedShare = trace.total_ms ? trace.unaccounted_ms / trace.total_ms : 0;
+    const summary = `<div class="trace-summary">
+        <span>total <b>${esc(msText(trace.total_ms))}</b></span>
+        ${isNum(trace.before_ms) ? `<span>before middleware <b>${esc(msText(trace.before_ms))}</b></span>` : ''}
+        <span>unaccounted <b class="${unaccountedShare > 0.25 ? 'warn' : ''}">${esc(msText(trace.unaccounted_ms))}</b>${trace.approximate ? ' <span class="muted">(at most)</span>' : ''}</span>
+        ${db ? `<span>db <b>${esc(db.count)}</b> ${db.count === 1 ? 'query' : 'queries'} · <b>${esc(msText(db.ms))}</b> · ${esc(db.distinct)} distinct</span>` : ''}
+        ${trace.truncated ? '<span class="warn">cut down to fit</span>' : ''}
+    </div>`;
+    const dropped = Object.entries(trace.spans_dropped || {});
+    const droppedNote = dropped.length
+        ? `<div class="muted">Over the span limit: ${esc(dropped.map(([name, d]) => `${name} ×${d.count} (${msText(d.ms)})`).join(', '))}</div>`
+        : '';
+    const statements = db && db.top && db.top.length
+        ? `<div class="stmt-list">${db.top.map(st => `<div class="stmt">
+            <span class="stmt-sql" title="${esc(st.sql)}">${esc(st.sql)}</span>
+            <span class="muted">×${esc(st.count)}</span>
+            <span>${esc(msText(st.ms))}</span>
+            <span class="muted">max ${esc(msText(st.max_ms))}</span>
+        </div>`).join('')}</div>`
+        : '';
+    const marks = (trace.marks || []).length
+        ? `<div class="mark-list">${trace.marks.map(m => `<div><span class="muted">${esc(msText(m.at))}</span> ${esc(m.msg)}</div>`).join('')}${trace.marks_dropped ? `<div class="muted">+${esc(trace.marks_dropped)} more</div>` : ''}</div>`
+        : '';
+    const tags = Object.keys(trace.tags || {}).length ? factsHtml(Object.entries(trace.tags)) : '';
+    return summary
+        + detailBlock('Timeline', waterfallHtml(trace) + droppedNote)
+        + detailBlock('Costliest statements', statements)
+        + detailBlock('Marks', marks)
+        + detailBlock('Tags', tags);
+}
+
+const KNOWN_CONTEXT = ['trace', 'trace_id', 'threshold', 'ip', 'user_agent'];
+
+function slowLogDetailHtml(payload) {
+    const log = payload.data;
+    const context = log.context || {};
+    const isRequest = log.type === 'request';
+    const facts = isRequest
+        ? [['Date', log.date], ['Route', log.route], ['URL', log.url], ['Status', log.status_code], ['User', log.user_id],
+            ['Threshold', isNum(context.threshold) ? msText(context.threshold) : null], ['IP', context.ip], ['User agent', context.user_agent], ['Trace', context.trace_id]]
+        : [['Date', log.date], ['Connection', log.connection], ['Trace', context.trace_id]];
+    const other = Object.fromEntries(Object.entries(context).filter(([key]) => !KNOWN_CONTEXT.includes(key)));
+    const bindings = (log.bindings || []).length
+        ? `<pre class="code">${esc(log.bindings.map(b => JSON.stringify(b)).join(', '))}</pre>`
+        : '';
+    const related = (payload.related || []).length
+        ? `<div class="related">${payload.related.map(r => `<div class="related-row">
+            <span class="muted">${esc(r.time)}</span><span class="muted">${esc(r.type)}</span>
+            <span class="duration warn">${esc(msText(r.duration_ms))}</span>
+            <span class="detail" title="${esc(slowLogSummary(r))}">${esc(slowLogSummary(r))}</span>
+        </div>`).join('')}</div>`
+        : '';
+    return factsHtml(facts)
+        + (isRequest ? '' : detailBlock('SQL', `<pre class="code">${esc(log.sql || '')}</pre>`))
+        + detailBlock('Bindings', bindings, log.bindings_total > (log.bindings || []).length ? `first ${log.bindings.length} of ${log.bindings_total}` : '')
+        + (isRequest && !context.trace ? `<div class="muted">No trace: logged before tracing, or tracing is off.</div>` : traceHtml(context.trace))
+        + detailBlock(isRequest ? 'Slow queries in this request' : 'Same request', related)
+        + detailBlock('Context', Object.keys(other).length ? `<pre class="code">${esc(JSON.stringify(other, null, 1))}</pre>` : '');
 }
 
 function segmentedHtml(name, options, current, group) {
@@ -164,7 +271,9 @@ function pinWindow(ctx) {
 function buildSlowLogs(section) {
     const id = uid();
     // scope: 'pin' = only around the pinned time (when one is set), 'all' = whole range.
-    const state = { type: section.log_type || '', sort: section.sort || 'duration', page: 1, seq: 0, ctx: null, key: null, window: null, scope: 'pin' };
+    const state = { type: section.log_type || '', sort: section.sort || 'duration', page: 1, seq: 0, ctx: null, key: null, window: null, scope: 'pin',
+        // Opened entries stay open across refreshes; their details are fetched once.
+        open: new Set(), details: new Map() };
     const showTypeFilter = section.controls !== false && !section.log_type;
     const controls = section.controls === false ? '' : `
         ${showTypeFilter ? segmentedHtml('Log type', [['', 'All'], ['request', 'Requests'], ['query', 'Queries']], state.type, 'type') : ''}
@@ -195,6 +304,42 @@ function buildSlowLogs(section) {
         if (caption) caption.hidden = pinned();
     }
 
+    function renderDetail(logId) {
+        const panel = byId(`${id}-log-${logId}`);
+        if (!panel) return;
+        const row = panel.previousElementSibling;
+        const open = state.open.has(logId);
+        row.setAttribute('aria-expanded', String(open));
+        panel.hidden = !open;
+        if (!open) return;
+        const entry = state.details.get(logId);
+        panel.innerHTML = entry === undefined
+            ? '<div class="muted">Loading…</div>'
+            : (entry === null ? '<div class="muted">Couldn\'t load this entry.</div>' : slowLogDetailHtml(entry));
+    }
+
+    async function toggleDetail(logId) {
+        if (state.open.has(logId)) {
+            state.open.delete(logId);
+            renderDetail(logId);
+            return;
+        }
+        state.open.add(logId);
+        renderDetail(logId);
+        if (state.details.get(logId)) return;
+        try {
+            const res = await fetch(`${BASE_URL}/api/slow-logs/${encodeURIComponent(logId)}`, { headers: { Accept: 'application/json' } });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            state.details.set(logId, await res.json());
+        } catch (e) {
+            console.error('[metrics] slow log entry', e);
+            state.details.set(logId, null);
+        }
+        renderDetail(logId);
+        // A failed load is tried again the next time the entry is opened.
+        if (state.details.get(logId) === null) state.details.delete(logId);
+    }
+
     async function load() {
         if (!state.ctx) return;
         const seq = ++state.seq;
@@ -214,8 +359,11 @@ function buildSlowLogs(section) {
             const data = await res.json();
             if (seq !== state.seq) return;
             rows.innerHTML = data.data?.length
-                ? data.data.map(log => slowLogRow(log, showType, template)).join('')
+                ? data.data.map(log => slowLogRow(log, showType, template, id)).join('')
                 : `<div class="empty" style="border-top:1px solid var(--line)">Nothing above the slow threshold ${esc(empty)}.</div>`;
+            state.open.forEach(logId => {
+                if (byId(`${id}-log-${logId}`)) renderDetail(logId);
+            });
             state.page = data.page || 1;
             pager.hidden = section.controls === false || !(data.last_page > 1);
             pager.innerHTML = `<button type="button" data-page="${state.page - 1}" aria-label="Previous page" ${state.page <= 1 ? 'disabled' : ''}>‹</button>
@@ -236,6 +384,10 @@ function buildSlowLogs(section) {
             root.addEventListener('click', e => {
                 const button = e.target.closest('button');
                 if (!button || button.disabled) return;
+                if (button.dataset.log) {
+                    toggleDetail(button.dataset.log);
+                    return;
+                }
                 if (button.dataset.page) {
                     state.page = parseInt(button.dataset.page, 10);
                 } else if (button.dataset.value !== undefined) {

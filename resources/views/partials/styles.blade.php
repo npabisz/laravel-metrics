@@ -155,9 +155,35 @@
     /* Slow log */
     .log { overflow-x: auto; }
     .log-rows { min-width: 700px; display: flex; flex-direction: column; }
-    .log-row { display: grid; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); font-family: var(--font-mono); font-size: 12px; }
-    .log-row .detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .log-row .duration { font-weight: 700; }
+    .log-row { display: grid; gap: 12px; align-items: baseline; width: 100%; padding: 8px 4px; margin: 0; background: none; color: inherit; text-align: left; border: 0; border-top: 1px solid var(--line); font-family: var(--font-mono); font-size: 12px; }
+    .log-row:hover { background: rgba(255, 255, 255, 0.03); }
+    .log-row[aria-expanded="true"] { background: rgba(255, 255, 255, 0.05); }
+    .log-row .detail, .related-row .detail { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .log-row .duration, .related-row .duration { font-weight: 700; }
+    .log-detail { display: flex; flex-direction: column; gap: 14px; padding: 12px 4px 18px; border-top: 1px dashed var(--line); font-size: 12px; }
+    .detail-block { display: flex; flex-direction: column; gap: 6px; }
+    .mini-head { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+    .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 16px; margin: 0; }
+    .facts dt { color: var(--muted); }
+    .facts dd { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+    .code { margin: 0; padding: 10px 12px; max-height: 260px; overflow: auto; background: var(--bg); border-radius: 8px; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .trace-summary { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+    .trace-summary b { font-weight: 600; }
+    .wf { display: flex; flex-direction: column; gap: 3px; }
+    .wf-row { display: grid; grid-template-columns: minmax(160px, 30%) minmax(0, 1fr) 72px; gap: 12px; align-items: center; }
+    .wf-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
+    .wf-track { position: relative; height: 10px; background: var(--bg); border-radius: 3px; }
+    .wf-bar { position: absolute; top: 0; bottom: 0; min-width: 2px; background: var(--ok); border-radius: 3px; }
+    .wf-bar.parent { background: var(--bar); }
+    .wf-bar.error { background: var(--error); }
+    .wf-ms { text-align: right; font-family: var(--font-mono); }
+    .wf-axis { font-size: 11px; }
+    .wf-scale { display: flex; justify-content: space-between; }
+    .stmt-list, .mark-list, .related { display: flex; flex-direction: column; gap: 4px; font-family: var(--font-mono); }
+    .stmt { display: grid; grid-template-columns: minmax(0, 1fr) 48px 72px 96px; gap: 12px; }
+    .stmt > span:not(.stmt-sql) { text-align: right; }
+    .stmt-sql { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .related-row { display: grid; grid-template-columns: 76px 70px 80px minmax(0, 1fr); gap: 12px; }
     .log-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .pager { display: flex; align-items: center; justify-content: center; gap: 12px; padding-top: 8px; color: var(--muted); font-size: 12px; }
     .pager button { height: 32px; min-width: 32px; background: var(--bg); color: var(--text); border: 0; border-radius: 8px; }

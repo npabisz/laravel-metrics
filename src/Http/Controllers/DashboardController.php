@@ -15,6 +15,18 @@ class DashboardController extends Controller
 {
     protected const MAX_MINUTES = 43200; // 30 days
 
+    /** Columns of a slow log row in a list: no context or bindings. */
+    protected const SLOW_LOG_LIST_COLUMNS = [
+        'id', 'type', 'duration_ms', 'recorded_at', 'method', 'url', 'route', 'status_code', 'user_id', 'sql', 'connection',
+    ];
+
+    /** Bindings of a slow query sent to the dashboard; a bulk insert can have thousands. */
+    protected const MAX_BINDINGS_SHOWN = 100;
+
+    /** Entries linked by trace_id: searched this far either side, at most this many. */
+    protected const RELATED_WINDOW_MINUTES = 10;
+    protected const MAX_RELATED = 50;
+
     protected const DEFAULT_PERIODS = [15 => '15m', 60 => '1h', 360 => '6h', 1440 => '24h'];
 
     protected const DEFAULT_STATUS_RULES = [
@@ -252,6 +264,33 @@ class DashboardController extends Controller
         return app(MetricAggregator::class)->aggregateCustom($all);
     }
 
+    /**
+     * One slow log entry in full, for the row the dashboard opens: the
+     * context (a slow request's trace), a query's bindings, and the entries
+     * the same trace links it to - a request's slow queries, or the request
+     * a slow query ran in.
+     */
+    public function apiSlowLog(int $id): JsonResponse
+    {
+        $log = SlowLog::find($id);
+
+        if (!$log) {
+            return response()->json(['message' => 'Not found.'], 404);
+        }
+
+        $bindings = is_array($log->bindings) ? $log->bindings : [];
+
+        return response()->json([
+            'data' => $this->slowLogRow($log) + [
+                'date'           => $log->recorded_at->format('Y-m-d H:i:s'),
+                'bindings'       => array_slice($bindings, 0, self::MAX_BINDINGS_SHOWN),
+                'bindings_total' => count($bindings),
+                'context'        => $log->context,
+            ],
+            'related' => $this->relatedSlowLogs($log),
+        ]);
+    }
+
     public function apiSlowLogs(Request $request): JsonResponse
     {
         [$since, $until] = $this->slowLogWindow($request);
@@ -288,22 +327,12 @@ class DashboardController extends Controller
             $query->orderBy('duration_ms', 'desc');
         }
 
+        // Context and bindings, up to a slow request's whole trace each,
+        // are read only for the entry that is opened (apiSlowLog()).
         $logs = $query->offset(($page - 1) * $perPage)
             ->limit($perPage)
-            ->get()
-            ->map(fn ($log) => [
-                'id'          => $log->id,
-                'type'        => $log->type,
-                'duration_ms' => round($log->duration_ms, 1),
-                'time'        => $log->recorded_at->format('H:i:s'),
-                'method'      => $log->method,
-                'url'         => $log->url,
-                'route'       => $log->route,
-                'status_code' => $log->status_code,
-                'user_id'     => $log->user_id,
-                'sql'         => $log->sql,
-                'connection'  => $log->connection,
-            ]);
+            ->get(self::SLOW_LOG_LIST_COLUMNS)
+            ->map(fn (SlowLog $log) => $this->slowLogRow($log));
 
         return response()->json([
             'data' => $logs,
@@ -312,6 +341,50 @@ class DashboardController extends Controller
             'total' => $total,
             'last_page' => $lastPage,
         ]);
+    }
+
+    protected function slowLogRow(SlowLog $log): array
+    {
+        return [
+            'id'          => $log->id,
+            'type'        => $log->type,
+            'duration_ms' => round($log->duration_ms, 1),
+            'time'        => $log->recorded_at->format('H:i:s'),
+            'method'      => $log->method,
+            'url'         => $log->url,
+            'route'       => $log->route,
+            'status_code' => $log->status_code,
+            'user_id'     => $log->user_id,
+            'sql'         => $log->sql,
+            'connection'  => $log->connection,
+        ];
+    }
+
+    /**
+     * Other entries with the same context.trace_id. They were logged while
+     * the same request ran, so only a window around this one is searched,
+     * on the recorded_at index.
+     */
+    protected function relatedSlowLogs(SlowLog $log): array
+    {
+        $traceId = $log->context['trace_id'] ?? null;
+
+        if (!is_string($traceId) || $traceId === '') {
+            return [];
+        }
+
+        return SlowLog::query()
+            ->whereKeyNot($log->id)
+            ->whereBetween('recorded_at', [
+                $log->recorded_at->copy()->subMinutes(self::RELATED_WINDOW_MINUTES),
+                $log->recorded_at->copy()->addMinutes(self::RELATED_WINDOW_MINUTES),
+            ])
+            ->where('context->trace_id', $traceId)
+            ->orderBy('id')
+            ->limit(self::MAX_RELATED)
+            ->get(self::SLOW_LOG_LIST_COLUMNS)
+            ->map(fn (SlowLog $related) => $this->slowLogRow($related))
+            ->all();
     }
 
     protected function minutes(Request $request): int

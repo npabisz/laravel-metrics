@@ -8,4 +8,5 @@ Route::middleware(AuthorizeMetrics::class)->group(function () {
     Route::get('/', [DashboardController::class, 'index']);
     Route::get('api/data', [DashboardController::class, 'apiData']);
     Route::get('api/slow-logs', [DashboardController::class, 'apiSlowLogs']);
+    Route::get('api/slow-logs/{id}', [DashboardController::class, 'apiSlowLog'])->whereNumber('id');
 });

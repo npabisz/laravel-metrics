@@ -194,7 +194,7 @@ Available at `/{path}` (default: `/metrics`). Protected by the `viewMetrics` gat
 - Panels — charts with inline stats, key/value rows, meters, tables, ranked bars and per-label trend small multiples, composed in config
 - Expressions — any value can be a metric key, arithmetic (`errors / calls * 100`) or a pattern function (`sum(container_*_memory_mb)`)
 - Tabbed views — organise metrics into pages, linkable via URL hash
-- Slow log — slowest or most recent requests and queries, filterable by type and route pattern, paginated
+- Slow log — slowest or most recent requests and queries, filterable by type and route pattern, paginated. A row opens to the whole entry: a slow request's [trace](#request-trace) as a timeline (spans with spans inside them grey, failed ones red), its costliest statements, marks and tags; a query's SQL and bindings (the first 100); and the entries the same trace links it to - a request's slow queries, or the request a query ran in
 - Status pill — configurable health rules summarised in the header
 - Period selector and auto-refresh — configurable ranges (default 15m / 1h / 6h / 24h) and interval (default 30 s)
 - Multi-resolution — raw 1-min data for short periods, 5-min grouped for mid-range, hourly rollups for days/weeks
