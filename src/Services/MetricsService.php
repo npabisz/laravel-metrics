@@ -15,6 +15,12 @@ class MetricsService
      */
     protected const KEY_TTL = 120;
 
+    /**
+     * Slow queries one request, job or command may leave waiting to be
+     * written; more are counted (db:slow_queries) but not logged.
+     */
+    protected const MAX_PENDING_SLOW_QUERIES = 100;
+
     protected bool $enabled;
     protected ?string $redisConnection = null;
     protected ?string $redisPrefix = null;
@@ -35,6 +41,9 @@ class MetricsService
     protected array $pendingKeys = [];
 
     protected int $pendingCount = 0;
+
+    /** @var list<array> slow_logs rows logSlowQuery() left for finish() */
+    protected array $pendingSlowQueries = [];
 
     /** @var callable|null */
     protected static $alertCallback = null;
@@ -192,6 +201,20 @@ class MetricsService
         } catch (\Throwable $e) {
             // Silently fail — monitoring should not break the app
         }
+    }
+
+    /**
+     * The request, job or command is over: send the counters to Redis and
+     * write the slow queries it logged.
+     *
+     * Called by MetricsServiceProvider after the response is sent, after
+     * each queue job and after each console command - never while a query
+     * event is being handled, which is why slow queries wait for it.
+     */
+    public function finish(): void
+    {
+        $this->flush();
+        $this->writeSlowQueries();
     }
 
     /**
@@ -361,7 +384,12 @@ class MetricsService
     }
 
     /**
-     * Log a slow query to the database.
+     * Log a slow query. The row is written by finish(), once the request,
+     * job or command is over: this is called from the query event, and an
+     * insert made there - on the application's connection, unless
+     * metrics.connection says otherwise - would replace the insert ID that
+     * Laravel reads right after the slow query, if that was an INSERT, and
+     * would belong to any transaction the query ran in.
      */
     public function logSlowQuery(
         string $sql,
@@ -370,20 +398,35 @@ class MetricsService
         string $connection,
         ?array $context = null
     ): void {
-        if (!$this->enabled) return;
+        if (!$this->enabled || count($this->pendingSlowQueries) >= static::MAX_PENDING_SLOW_QUERIES) {
+            return;
+        }
 
-        try {
-            SlowLog::create([
-                'recorded_at' => now(),
-                'type'        => SlowLog::TYPE_QUERY,
-                'sql'         => mb_substr($sql, 0, 65535),
-                'bindings'    => $bindings,
-                'duration_ms' => round($durationMs, 2),
-                'connection'  => $connection,
-                'context'     => $context,
-            ]);
-        } catch (\Throwable $e) {
-            // Silently fail
+        $this->pendingSlowQueries[] = [
+            'recorded_at' => now(),
+            'type'        => SlowLog::TYPE_QUERY,
+            'sql'         => mb_substr($sql, 0, 65535),
+            'bindings'    => $bindings,
+            'duration_ms' => round($durationMs, 2),
+            'connection'  => $connection,
+            'context'     => $context,
+        ];
+    }
+
+    /**
+     * Write the slow queries logged since the last call.
+     */
+    public function writeSlowQueries(): void
+    {
+        $rows = $this->pendingSlowQueries;
+        $this->pendingSlowQueries = [];
+
+        foreach ($rows as $row) {
+            try {
+                SlowLog::create($row);
+            } catch (\Throwable $e) {
+                // Silently fail
+            }
         }
     }
 

@@ -4,14 +4,18 @@ namespace Npabisz\LaravelMetrics\Listeners;
 
 use Illuminate\Database\Events\QueryExecuted;
 use Npabisz\LaravelMetrics\Services\MetricsService;
+use Npabisz\LaravelMetrics\Trace\RequestTrace;
 
 class QueryListener
 {
     protected MetricsService $metrics;
 
-    public function __construct(MetricsService $metrics)
+    protected RequestTrace $trace;
+
+    public function __construct(MetricsService $metrics, RequestTrace $trace)
     {
         $this->metrics = $metrics;
+        $this->trace = $trace;
     }
 
     public function handle(QueryExecuted $event): void
@@ -20,6 +24,9 @@ class QueryListener
         if (str_contains($event->sql, 'metrics') && preg_match('/\b(metrics|metrics_slow_logs|metrics_hourly)\b/', $event->sql)) {
             return;
         }
+
+        // Does nothing outside a traced request
+        $this->trace->query($event->sql, $event->time);
 
         // Track aggregate metrics
         $this->metrics->increment('db', 'queries_total');
@@ -35,7 +42,10 @@ class QueryListener
                 $event->sql,
                 $event->bindings,
                 $event->time,
-                $event->connectionName
+                $event->connectionName,
+                // Links the query to the request it ran in, should that
+                // request be logged too.
+                $this->trace->isActive() ? ['trace_id' => $this->trace->id()] : null
             );
         }
     }

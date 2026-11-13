@@ -56,6 +56,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Request Trace
+    |--------------------------------------------------------------------------
+    | While a request runs, what it spends its time on is kept in memory:
+    | database queries (count, total time, the costliest statements) and
+    | whatever the application measures with RequestTrace (measure(),
+    | record(), mark(), tag()). A slow request is logged with it in
+    | context.trace; for any other request it is dropped. Slow queries logged
+    | during the request carry the same context.trace_id.
+    |
+    | 'max_spans' and 'max_marks' cap what one request keeps (spans over the
+    | cap are summed up by name), 'top_queries' is how many of the costliest
+    | statements are stored, 'max_bytes' caps the stored trace.
+    */
+    'trace' => [
+        'enabled'     => env('METRICS_TRACE', true),
+        'max_spans'   => 50,
+        'max_marks'   => 50,
+        'top_queries' => 5,
+        'max_bytes'   => 16384,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Middleware Group
     |--------------------------------------------------------------------------
     | When track_requests is true, which middleware group to append to.

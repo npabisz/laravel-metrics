@@ -23,6 +23,7 @@ use Npabisz\LaravelMetrics\Listeners\QueryListener;
 use Npabisz\LaravelMetrics\Middleware\RequestMonitor;
 use Npabisz\LaravelMetrics\Services\MetricAggregator;
 use Npabisz\LaravelMetrics\Services\MetricsService;
+use Npabisz\LaravelMetrics\Trace\RequestTrace;
 
 class MetricsServiceProvider extends ServiceProvider
 {
@@ -32,6 +33,7 @@ class MetricsServiceProvider extends ServiceProvider
 
         $this->app->singleton(MetricsService::class);
         $this->app->singleton(MetricAggregator::class);
+        $this->app->singleton(RequestTrace::class, fn () => RequestTrace::fromConfig((array) config('metrics.trace', [])));
     }
 
     public function boot(): void
@@ -44,6 +46,7 @@ class MetricsServiceProvider extends ServiceProvider
         $this->publishAssets();
         $this->registerCommands();
         $this->registerSchedule();
+        $this->resolveSharedServices();
         $this->registerMiddleware();
         $this->registerQueryListener();
         $this->registerFlush();
@@ -112,6 +115,23 @@ class MetricsServiceProvider extends ServiceProvider
         });
     }
 
+    /**
+     * Create the services the middleware and the query listener share now
+     * rather than on first use. Under Octane each request runs in a copy of
+     * the application made after boot, while the query listener is resolved
+     * by the event dispatcher, which keeps the original; created any later,
+     * the two could each end up with their own - the trace without the
+     * request's queries, the slow queries written after the next request.
+     */
+    protected function resolveSharedServices(): void
+    {
+        $this->app->make(MetricsService::class);
+
+        if (config('metrics.trace.enabled', true)) {
+            $this->app->make(RequestTrace::class);
+        }
+    }
+
     protected function registerMiddleware(): void
     {
         if (!config('metrics.track_requests', true)) {
@@ -160,17 +180,13 @@ class MetricsServiceProvider extends ServiceProvider
     }
 
     /**
-     * When the values recorded in batch mode go to Redis: once the response
-     * has been sent (also for each request of an Octane worker, which
-     * terminates every request), after each queue job, and after each
-     * console command.
+     * When the values recorded in batch mode go to Redis and logged slow
+     * queries to the database: once the response has been sent (also for
+     * each request of an Octane worker, which terminates every request),
+     * after each queue job, and after each console command.
      */
     protected function registerFlush(): void
     {
-        if (!config('metrics.batch.enabled', true)) {
-            return;
-        }
-
         // The container is passed in rather than taken from $this->app: under
         // Octane each request runs in a copy of the application, which holds
         // the service that request recorded into.
@@ -187,7 +203,7 @@ class MetricsServiceProvider extends ServiceProvider
     protected static function flushIfResolved(Container $app): void
     {
         if ($app->resolved(MetricsService::class)) {
-            $app->make(MetricsService::class)->flush();
+            $app->make(MetricsService::class)->finish();
         }
     }
 
